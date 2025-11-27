@@ -27,12 +27,17 @@ jobs:
           pip install -r requirements.txt
           pip install schedule
       
-      - name: Run Daily Briefing
+      - name: Send Startup Alert
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python src/alpha_lab/scheduler.py --task briefing
+          python -c "
+          from src.alpha_lab.alerts import get_alert_manager
+          mgr = get_alert_manager()
+          mgr.regime_change('STARTUP', 'RUNNING', 100.0)
+          print('Startup alert sent')
+          "
       
       - name: Run Regime Check
         env:
