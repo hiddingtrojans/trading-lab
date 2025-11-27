@@ -1,0 +1,29 @@
+env: paper              # paper | live
+host: "127.0.0.1"
+port: 4001              # 4001 live, 4002 paper
+client_id: 3
+account: "DUK291549"
+
+routing:
+  default_exchange: "SMART"
+  time_in_force: "DAY"
+  open_order_type: "MKT"   # use MKT+OPG for MOO
+  close_order_type: "MKT"  # use MOC where supported
+
+risk:
+  max_gross: 1.0
+  per_asset_cap: 0.30
+  max_order_notional: 250000
+  allow_shorts: true
+
+symbols:
+  ETFs: [SPY, QQQ, IWM, TLT, GLD, HYG, IBIT]
+
+cutoffs:
+  submit_before_open_local: "09:20"
+  submit_moc_before_close_local: "15:45"
+
+market_data:
+  md_type: 1          # 1 live, 3 delayed
+  subscribe_depth: false
+

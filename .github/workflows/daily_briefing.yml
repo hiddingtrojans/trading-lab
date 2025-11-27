@@ -1,0 +1,43 @@
+name: Daily Market Briefing
+
+on:
+  # Run at 8:30 AM ET (12:30 UTC during EST, 13:30 UTC during EDT)
+  schedule:
+    - cron: '30 13 * * 1-5'  # 8:30 AM ET (EDT)
+  
+  # Manual trigger
+  workflow_dispatch:
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install schedule
+      
+      - name: Run Daily Briefing
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python src/alpha_lab/scheduler.py --task briefing
+      
+      - name: Run Regime Check
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python src/alpha_lab/scheduler.py --task regime
+

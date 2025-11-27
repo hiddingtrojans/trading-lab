@@ -1,0 +1,205 @@
+# Investment Opportunity Scanner Rules
+
+## Purpose
+Help identify and analyze stocks meeting specific fundamental, technical, and options criteria for both LEAPS investments and day trading opportunities.
+
+## Core Analysis Framework
+
+### When Asked to Find Investment Opportunities:
+
+1. **Growth Screening** (for "find high growth stocks"):
+   - Revenue growth > 20% YoY
+   - Earnings growth > 15% YoY
+   - Gross margin expansion
+   - Free cash flow positive
+   - Market cap > $1B (avoid micro-caps)
+
+2. **Value Screening** (for "find undervalued stocks"):
+   - P/E < industry average
+   - PEG ratio < 1.5
+   - Price/Book < 3
+   - EV/EBITDA < 12
+   - Free cash flow yield > 5%
+
+3. **Momentum Screening** (for "find momentum stocks"):
+   - Price above 50 and 200 DMA
+   - RSI between 40-70
+   - 3-month price momentum > 10%
+   - Volume surge (20-day avg > 50-day avg)
+   - Relative strength vs SPY > 1.2
+
+4. **LEAPS Candidates** (for "find LEAPS opportunities"):
+   - Options liquidity (volume > 1000 contracts/day)
+   - Implied volatility < 50% (unless biotech)
+   - Strong fundamentals (revenue growth + profitability)
+   - Technical setup (consolidation or breakout)
+   - Catalyst timeline (earnings, product launches)
+
+5. **Day Trading Setups** (for "find day trading candidates"):
+   - Average daily volume > 5M shares
+   - ATR > $2
+   - Pre-market gap > 2%
+   - News catalyst present
+   - Clear support/resistance levels
+
+## Analysis Output Format
+
+When providing ticker recommendations, ALWAYS include:
+
+```
+TICKER: [Symbol]
+Company: [Full Name]
+Sector: [Sector/Industry]
+Market Cap: $[Amount]B
+Why Selected: [Brief reason matching criteria]
+
+Key Metrics:
+- Revenue Growth: [X]% YoY
+- Earnings Growth: [X]% YoY  
+- Gross Margin: [X]%
+- P/E Ratio: [X]
+- RSI: [X]
+- Price vs 50DMA: [+/-X]%
+
+LEAPS Potential: [Yes/No - reason]
+Day Trade Setup: [Yes/No - reason]
+Risk Factors: [Top 2-3 risks]
+```
+
+## Specific Searches
+
+### For "Find stocks with 20%+ revenue growth":
+```sql
+SELECT ticker WHERE:
+- Revenue growth (TTM) > 20%
+- Revenue growth (next year est) > 15%
+- Positive earnings or path to profitability
+- Market cap > $2B
+- Not in bankruptcy/distress
+```
+
+### For "Find LEAPS candidates in tech":
+```sql
+SELECT ticker WHERE:
+- Sector = Technology
+- Options volume > 5000/day
+- IV percentile < 50%
+- Revenue growth > 15%
+- Strong competitive moat
+- 12+ month catalyst pipeline
+```
+
+### For "Find gap up stocks for day trading":
+```sql
+SELECT ticker WHERE:
+- Pre-market gap > 2%
+- Volume in pre-market > 500K
+- Float < 500M shares
+- Recent news/catalyst
+- ATR > $1.50
+- Previous day close > VWAP
+```
+
+## Integration with cursor_workflow.py
+
+After identifying tickers, suggest running:
+```bash
+python cursor_workflow.py --tickers [TICKER_LIST] --criteria "[SEARCH_CRITERIA]"
+```
+
+## Risk Warnings to Include
+
+Always mention:
+- "Options involve risk and are not suitable for all investors"
+- "Past performance doesn't guarantee future results"
+- "Do your own due diligence"
+- "Consider position sizing and risk management"
+
+## Enhanced Filtering
+
+### Exclude:
+- Chinese ADRs (unless specifically requested)
+- OTC/Pink sheet stocks
+- Stocks with average volume < 500K
+- Penny stocks < $5 (unless specifically requested)
+- Companies with going concern warnings
+
+### Prioritize:
+- Profitable or FCF positive companies
+- Strong insider ownership (>10%)
+- Low debt/equity ratios (<0.5)
+- Growing market share
+- Multiple expansion catalysts
+
+## Sector-Specific Criteria
+
+### Technology:
+- R&D spending > 10% of revenue
+- Recurring revenue > 50%
+- Customer retention > 90%
+
+### Healthcare/Biotech:
+- Pipeline depth (Phase 2/3 trials)
+- Cash runway > 2 years
+- Partnership potential
+
+### Consumer:
+- Same-store sales growth > 3%
+- E-commerce growth > 20%
+- Brand strength metrics
+
+### Financial:
+- ROE > 12%
+- Efficiency ratio < 60%
+- Loan loss provisions trending down
+
+## Output Examples
+
+Good response:
+"Based on your criteria for 20%+ revenue growth stocks, here are 5 candidates:
+
+1. NVDA - NVIDIA Corporation
+   - Revenue Growth: 122% YoY
+   - AI/Datacenter boom beneficiary
+   - LEAPS: Excellent (high liquidity)
+   
+2. PLTR - Palantir
+   - Revenue Growth: 23% YoY  
+   - Government contract expansion
+   - LEAPS: Good (growing volume)
+
+[Continue with 3-5 more...]
+
+Run comprehensive analysis:
+`python cursor_workflow.py --tickers NVDA,PLTR,... --criteria "20%+ revenue growth"`
+"
+
+## Special Situations
+
+### For earnings plays:
+- Check historical earnings reactions
+- IV crush expectations
+- Whisper numbers vs consensus
+
+### For M&A targets:
+- Small cap in consolidating industry
+- Strong IP/technology
+- Clean balance sheet
+- Strategic buyer interest
+
+### For turnarounds:
+- New management team
+- Cost cutting initiatives
+- Revenue stabilization
+- Debt refinancing complete
+
+## Remember:
+- Always provide 5-10 tickers maximum per search
+- Include mix of large/mid cap when possible  
+- Explain WHY each ticker matches criteria
+- Suggest appropriate strategy (LEAPS vs day trade)
+- Include relevant risk warnings
+- Format for easy copy/paste into analysis script
+
+
+

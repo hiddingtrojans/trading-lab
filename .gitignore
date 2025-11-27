@@ -1,0 +1,11 @@
+# Sensitive configs
+configs/telegram.env
+.env
+__pycache__/
+*.pyc
+leaps_env/
+venv/
+*.db
+data/output/
+data/watchlists/
+catboost_info/

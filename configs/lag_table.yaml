@@ -1,0 +1,13 @@
+# Data availability and lag rules
+# Format: source: availability_rule  # when usable
+
+price: D0_close              # usable next session
+etf_flows: D0_eod            # usable t+1
+finbert_news: D0_20:00_utc   # include published before cutoff; usable t+1
+macro_surprise: D0_release   # trade t+1 only
+rrp_tga: D0_eod              # t+1
+cot_weekly: Fri_for_Tue      # t+1 with staleness flag
+broker_orders: D0_submit_before_open
+broker_execs: D0_intraday
+borrow_fees: D0_eod
+

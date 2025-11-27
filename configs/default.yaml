@@ -1,0 +1,44 @@
+universe: [SPY, QQQ, IWM, TLT, GLD, HYG, IBIT]
+bars: daily
+signal_cutoff_utc: "21:00"
+
+costs:
+  etf_bps: 2
+  ibit_bps: 6
+  borrow_bps_per_day: 5
+
+risk:
+  target_vol_annual: 0.10
+  max_gross: 1.0
+  max_dd: 0.10
+  per_asset_cap: 0.30
+
+cv:
+  folds: 5
+  embargo_days: 21
+  train_min_days: 504
+  refit: expanding
+
+models:
+  - id: M3_trend
+    type: trend_kalman
+  - id: M5_garch_rp
+    type: garch_rp
+  - id: M9_qgb
+    type: qgb
+  - id: M11_hmm
+    type: hmm_regime
+  - id: M12_clf
+    type: classifier
+
+overlays:
+  flow_regime_score: true
+
+features:
+  sentiment: finbert
+  macro: surprises
+  flows: basic
+
+execution:
+  mode: simulate   # simulate | ibkr
+

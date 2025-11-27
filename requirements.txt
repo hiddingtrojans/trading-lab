@@ -1,0 +1,22 @@
+
+# Configuration (optional but useful)
+# Core IBKR API
+# Data processing and analysis
+# FREE AI analysis
+# Fundamental analysis (FREE)
+# LEAPS Scanner Dependencies
+# Logging and utilities (usually included in Python standard library)
+# Optional: For enhanced data visualization (not required for core functionality)
+# Output formatting
+# datetime, logging, pathlib, asyncio, time are built-in
+# matplotlib>=3.7.0
+# seaborn>=0.12.0
+ib_insync>=0.9.86
+numpy>=1.24.0
+openai>=1.0.0
+pandas>=2.0.0
+pyyaml>=6.0
+requests>=2.31.0
+schedule
+tabulate>=0.9.0
+yfinance>=0.2.28

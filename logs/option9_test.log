@@ -1,0 +1,20 @@
+
+Fold 1:
+  Train: 504 days
+  Test: 32 days
+  Gap: 22 days
+
+Fold 2:
+  Train: 536 days
+  Test: 32 days
+  Gap: 22 days
+
+Fold 3:
+  Train: 568 days
+  Test: 11 days
+  Gap: 22 days
+
+✅ Generated 3 valid splits
+✅ Expanding window validated
+
+✅ All CV tests passed!
