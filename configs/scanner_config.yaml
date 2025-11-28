@@ -63,6 +63,7 @@ regime:
   vix_green: 20          # VIX below this = GREEN
   vix_yellow: 30         # VIX below this = YELLOW, above = RED
   spy_sma_period: 50     # SMA period for trend
+  min_breadth: 40        # Min % of stocks above SMA50 for healthy market
 
 # Alerts
 alerts:

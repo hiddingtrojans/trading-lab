@@ -23,6 +23,7 @@ import yfinance as yf
 
 from alpha_lab.universes import get_universe
 from alpha_lab.config import get_config
+from alpha_lab.market_breadth import is_market_healthy
 
 
 class TradeScanner:
@@ -49,9 +50,18 @@ class TradeScanner:
             'atr_period': get_config('indicators.atr_period', 14),
         }
         
-    def scan(self, top_n: int = 5) -> List[Dict]:
+    def scan(self, top_n: int = 5, check_breadth: bool = True) -> List[Dict]:
         """Scan for trade setups. Returns actionable signals only."""
         results = []
+        
+        # Check market breadth first
+        if check_breadth:
+            healthy, reason = is_market_healthy()
+            if not healthy:
+                print(f"WARNING: {reason}")
+                print("Returning empty - market too weak for new longs.")
+                return []
+            print(f"Market breadth: OK")
         
         print(f"Scanning {len(self.universe)} stocks for trade setups...")
         
