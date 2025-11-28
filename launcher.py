@@ -268,6 +268,28 @@ def check_performance():
     print("   This shows if the scanner is actually profitable.\n")
     run_command("python src/alpha_lab/performance_checker.py")
 
+def options_flow_scanner():
+    """Real-time options flow scanner (requires IBKR)."""
+    print("\n💰 OPTIONS FLOW SCANNER (IBKR)")
+    print("   Detects unusual options activity in real-time.")
+    print("   Requires TWS or IB Gateway running.\n")
+    
+    print("   1. Quick Scan (one-time)")
+    print("   2. Continuous Monitoring")
+    print("   3. Custom Tickers")
+    
+    choice = input("\n   Enter choice (1-3): ")
+    
+    if choice == "1":
+        run_command("python src/alpha_lab/options_flow_scanner.py")
+    elif choice == "2":
+        print("\n   Running continuous scan. Press Ctrl+C to stop.")
+        run_command("python src/alpha_lab/options_flow_scanner.py --continuous --interval 5")
+    elif choice == "3":
+        tickers = input("   Enter tickers (e.g. NVDA,TSLA,AMD): ").strip()
+        if tickers:
+            run_command(f"python src/alpha_lab/options_flow_scanner.py --tickers {tickers}")
+
 def main():
     while True:
         clear_screen()
@@ -282,6 +304,7 @@ def main():
         print("   7. 🔧  Advanced Tools")
         print("   8. 🔭  Universe Scan (Find Edge)")
         print("   9. 📈  Performance Check (Did Signals Work?)")
+        print("  10. 💰  Options Flow Scanner (IBKR)")
         print("   0. ❌  Exit")
         
         choice = input("\nSelect an option: ")
@@ -304,6 +327,8 @@ def main():
             universe_scan()
         elif choice == "9":
             check_performance()
+        elif choice == "10":
+            options_flow_scanner()
         elif choice == "0":
             print("\nGoodbye! Happy Trading.")
             sys.exit(0)

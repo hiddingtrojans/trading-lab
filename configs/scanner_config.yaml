@@ -85,6 +85,14 @@ grading:
   # Grade C: Marginal setup (lower confidence)
   # Anything that passes filters but below B thresholds
 
+# Options Flow Scanner (IBKR)
+options_flow:
+  min_premium: 50000       # Minimum premium to consider ($)
+  large_premium: 100000    # Alert threshold for large trades ($)
+  vol_oi_ratio: 5.0        # Volume/Open Interest ratio for alert
+  far_otm_pct: 15          # % OTM to consider "far"
+  far_otm_min_premium: 25000  # Min premium for far OTM alerts
+
 # Alerts
 alerts:
   near_stop_pct: 2       # Alert if within this % of stop
