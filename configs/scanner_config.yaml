@@ -58,6 +58,11 @@ tracking:
   max_hold_days: 10      # Expire signals after this many days
   check_interval_hours: 4
 
+# Earnings
+earnings:
+  blackout_days: 5       # Reject signals within this many days of earnings
+  warn_days: 7           # Warn (but allow) within this many days
+
 # Market Regime
 regime:
   vix_green: 20          # VIX below this = GREEN

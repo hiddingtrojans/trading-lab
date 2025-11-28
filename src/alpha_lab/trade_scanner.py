@@ -12,7 +12,7 @@ Outputs:
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import pandas as pd
 import numpy as np
 
@@ -170,8 +170,10 @@ class TradeScanner:
         else:
             shares = 0
         
-        # === Earnings check ===
-        earnings_warning = self._check_earnings(stock)
+        # === Earnings check (blackout filter) ===
+        should_reject, earnings_warning = self._check_earnings(stock)
+        if should_reject:
+            return None  # Hard reject - too close to earnings
         
         return {
             'ticker': ticker,
@@ -199,8 +201,16 @@ class TradeScanner:
         ], axis=1).max(axis=1)
         return tr.rolling(period).mean().iloc[-1]
     
-    def _check_earnings(self, stock) -> str:
-        """Check if earnings are coming soon."""
+    def _check_earnings(self, stock) -> Tuple[bool, str]:
+        """
+        Check if earnings are coming soon.
+        
+        Returns:
+            (should_reject, warning_message)
+        """
+        blackout_days = get_config('earnings.blackout_days', 5)
+        warn_days = get_config('earnings.warn_days', 7)
+        
         try:
             cal = stock.calendar
             if cal is not None and not cal.empty:
@@ -210,11 +220,18 @@ class TradeScanner:
                         earnings_date = earnings_date.iloc[0]
                     if pd.notna(earnings_date):
                         days_until = (earnings_date - datetime.now()).days
-                        if 0 <= days_until <= 7:
-                            return f"EARNINGS IN {days_until} DAYS"
+                        
+                        # Hard reject - too close to earnings
+                        if 0 <= days_until <= blackout_days:
+                            return True, f"EARNINGS IN {days_until} DAYS - BLACKOUT"
+                        
+                        # Warn but allow
+                        if blackout_days < days_until <= warn_days:
+                            return False, f"EARNINGS IN {days_until} DAYS"
         except:
             pass
-        return ""
+        
+        return False, ""
 
 
 def format_trade_signals(signals: List[Dict]) -> str:
