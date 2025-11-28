@@ -239,6 +239,13 @@ def universe_scan():
     print("\n   This takes 2-3 minutes. Be patient.\n")
     run_command("python src/alpha_lab/universe_scanner.py")
 
+def check_performance():
+    """Validate if recent signals actually worked."""
+    print("\n📈 SIGNAL PERFORMANCE CHECK")
+    print("   Validating signals from the past 5-10 days...")
+    print("   This shows if the scanner is actually profitable.\n")
+    run_command("python src/alpha_lab/performance_checker.py")
+
 def main():
     while True:
         clear_screen()
@@ -252,6 +259,7 @@ def main():
         print("   6. ☕  Daily Briefing (One-Click Research)")
         print("   7. 🔧  Advanced Tools")
         print("   8. 🔭  Universe Scan (Find Edge)")
+        print("   9. 📈  Performance Check (Did Signals Work?)")
         print("   0. ❌  Exit")
         
         choice = input("\nSelect an option: ")
@@ -272,6 +280,8 @@ def main():
             advanced_tools()
         elif choice == "8":
             universe_scan()
+        elif choice == "9":
+            check_performance()
         elif choice == "0":
             print("\nGoodbye! Happy Trading.")
             sys.exit(0)
