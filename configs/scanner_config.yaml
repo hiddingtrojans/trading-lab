@@ -1,0 +1,73 @@
+# Scanner Configuration
+# =====================
+# All thresholds in one place. Edit here instead of code.
+
+# Account Settings
+account:
+  size: 100000           # Base account size for position sizing
+  risk_per_trade: 500    # Max $ risk per trade
+  max_positions: 10      # Maximum concurrent positions
+  max_sector_pct: 25     # Max % in any single sector
+
+# Extension Filter (reject extended stocks)
+extension:
+  hard_reject_5d: 20     # Reject if 5D move > this %
+  penalty_threshold_high: 15  # Heavy penalty if 5D > this
+  penalty_threshold_mid: 10   # Moderate penalty if 5D > this
+  penalty_threshold_low: 7    # Minor penalty if 5D > this
+  penalty_high: 30
+  penalty_mid: 15
+  penalty_low: 5
+
+# Breakout Detection
+breakout:
+  fresh_threshold: 1.05  # Fresh if price < prior_high * this
+  volume_surge: 1.5      # Min volume ratio for breakout
+  price_near_high: 0.98  # Price >= high_20 * this = near high
+
+# Pullback Setup
+pullback:
+  sma_tolerance: 0.02    # Within 2% of SMA20
+  min_20d_momentum: 5    # Min 20D momentum for pullback buy
+
+# Consolidation Setup
+consolidation:
+  max_range_pct: 0.08    # Max (high-low)/price for tight range
+
+# Filters
+filters:
+  min_price: 3           # Reject stocks below this price
+  min_avg_volume: 500000 # Reject if avg volume below this
+  min_market_cap: 300000000  # $300M minimum
+
+# Technical Indicators
+indicators:
+  atr_period: 14
+  sma_short: 20
+  sma_long: 50
+  rsi_period: 14
+
+# Stop/Target Calculation
+risk_reward:
+  stop_atr_multiplier: 1.5   # Stop = entry - ATR * this
+  target_atr_multiplier: 3.0 # Target = entry + ATR * this
+  min_rr_ratio: 1.5          # Minimum R:R to signal
+
+# Signal Tracking
+tracking:
+  max_hold_days: 10      # Expire signals after this many days
+  check_interval_hours: 4
+
+# Market Regime
+regime:
+  vix_green: 20          # VIX below this = GREEN
+  vix_yellow: 30         # VIX below this = YELLOW, above = RED
+  spy_sma_period: 50     # SMA period for trend
+
+# Alerts
+alerts:
+  near_stop_pct: 2       # Alert if within this % of stop
+  near_target_pct: 2     # Alert if within this % of target
+  drawdown_alert: -5     # Alert if unrealized P&L below this %
+  total_risk_alert: 10   # Alert if total risk > this % of account
+

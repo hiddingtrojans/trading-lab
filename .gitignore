@@ -3,8 +3,11 @@ configs/telegram.env
 .env
 __pycache__/
 *.pyc
+
+# Virtual environments (use any one)
 leaps_env/
 venv/
+.venv/
 *.db
 data/output/
 data/watchlists/
