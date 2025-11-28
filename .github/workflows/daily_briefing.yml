@@ -8,6 +8,7 @@ on:
 jobs:
   briefing:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +19,7 @@ jobs:
       
       - run: pip install -r requirements.txt
       
-      - name: Generate Briefing
+      - name: Scan Universe and Send Alert
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -34,127 +35,69 @@ jobs:
           def send(msg):
               url = f'https://api.telegram.org/bot{token}/sendMessage'
               data = urllib.parse.urlencode({'chat_id': chat_id, 'text': msg}).encode()
-              urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=10)
+              urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=30)
 
           import yfinance as yf
           from alpha_lab.market_regime import MarketRegimeAnalyzer
-          from alpha_lab.sector_rotation import SectorRotationAnalyzer
+          from alpha_lab.universe_scanner import UniverseScanner
           from utils.data_fetcher import DataFetcher
 
+          print('Starting scan...')
+
+          # 1. MARKET REGIME
           fetcher = DataFetcher(None)
-
-          # SECTOR NAMES
-          sector_names = {
-              'XLK': 'Technology', 'XLC': 'Communications', 'XLY': 'Consumer Discretionary',
-              'XLF': 'Financials', 'XLE': 'Energy', 'XLV': 'Healthcare',
-              'XLI': 'Industrials', 'XLB': 'Materials', 'XLU': 'Utilities',
-              'XLRE': 'Real Estate', 'XLP': 'Consumer Staples'
-          }
-
-          # SCAN UNIVERSE (liquid stocks across sectors)
-          universe = [
-              ('NVDA', 'NVIDIA'), ('AAPL', 'Apple'), ('MSFT', 'Microsoft'), ('GOOGL', 'Alphabet'),
-              ('META', 'Meta'), ('AMZN', 'Amazon'), ('TSLA', 'Tesla'), ('AMD', 'AMD'),
-              ('JPM', 'JPMorgan'), ('GS', 'Goldman Sachs'), ('V', 'Visa'),
-              ('XOM', 'Exxon'), ('CVX', 'Chevron'),
-              ('UNH', 'UnitedHealth'), ('JNJ', 'Johnson & Johnson'),
-              ('CAT', 'Caterpillar'), ('BA', 'Boeing'),
-              ('NFLX', 'Netflix'), ('DIS', 'Disney'),
-              ('COIN', 'Coinbase'), ('SQ', 'Block'), ('PLTR', 'Palantir'),
-          ]
-
-          # 1. REGIME
           regime = MarketRegimeAnalyzer(fetcher).analyze_regime()
           regime_emoji = {'GREEN': '🟢', 'YELLOW': '🟡', 'RED': '🔴'}.get(regime['status'], '⚪')
 
-          # 2. SPY KEY LEVELS
+          # 2. SPY CONTEXT
           spy = yf.Ticker('SPY').history(period='1mo')
           spy_price = spy['Close'].iloc[-1]
           spy_sma20 = spy['Close'].rolling(20).mean().iloc[-1]
           spy_change = (spy['Close'].iloc[-1] / spy['Close'].iloc[-2] - 1) * 100
 
-          # 3. SECTORS
-          sectors = SectorRotationAnalyzer(fetcher).analyze_sectors()
-          rankings = sectors.get('rankings', [])
-          
-          leading_sectors = []
-          for s in rankings[:3]:
-              if s.get('score', 0) > 70:
-                  name = sector_names.get(s['ticker'], s['ticker'])
-                  leading_sectors.append(f\"{name} ({s['ticker']})\")
+          # 3. SCAN UNIVERSE (this is the real work)
+          print('Scanning 150+ small/mid caps...')
+          scanner = UniverseScanner(include_mid_caps=True)
+          results = scanner.scan(top_n=5)
 
-          # 4. SCAN STOCKS - find momentum + strength
-          opportunities = []
-          for ticker, name in universe:
-              try:
-                  hist = yf.Ticker(ticker).history(period='1mo')
-                  if len(hist) < 20:
-                      continue
-                  
-                  price = hist['Close'].iloc[-1]
-                  sma20 = hist['Close'].rolling(20).mean().iloc[-1]
-                  mom_5d = (hist['Close'].iloc[-1] / hist['Close'].iloc[-5] - 1) * 100
-                  mom_20d = (hist['Close'].iloc[-1] / hist['Close'].iloc[0] - 1) * 100
-                  above_sma = price > sma20
-                  
-                  # Score: momentum + trend
-                  score = 0
-                  if mom_5d > 3: score += 2
-                  elif mom_5d > 0: score += 1
-                  if mom_20d > 10: score += 2
-                  elif mom_20d > 5: score += 1
-                  if above_sma: score += 2
-                  
-                  if score >= 3:  # Only interesting ones
-                      opportunities.append({
-                          'ticker': ticker,
-                          'name': name,
-                          'price': price,
-                          'mom_5d': mom_5d,
-                          'mom_20d': mom_20d,
-                          'above_sma': above_sma,
-                          'score': score
-                      })
-              except Exception as e:
-                  continue
+          # 4. BUILD MESSAGE
+          msg = f'''{regime_emoji} MORNING SCAN - {datetime.now().strftime('%b %d')}
 
-          # Sort by score
-          opportunities.sort(key=lambda x: x['score'], reverse=True)
-          top_5 = opportunities[:5]
-
-          # BUILD MESSAGE
-          msg = f'''{regime_emoji} MORNING BRIEFING - {datetime.now().strftime('%b %d, %Y')}
-
-          MARKET REGIME: {regime['status']}
+          REGIME: {regime['status']} ({regime['score']}/100)
           {regime['action']}
 
           SPY: \${spy_price:.2f} ({spy_change:+.1f}%)
-          Key Support: \${spy_sma20:.2f}
+          Support: \${spy_sma20:.2f}
 
           '''
-          
-          if leading_sectors:
-              msg += f\"\"\"STRONG SECTORS:
-          {chr(10).join(['• ' + s for s in leading_sectors])}
 
-          \"\"\"
-
-          if top_5:
+          if results:
               msg += 'TOP OPPORTUNITIES:\\n'
-              for opp in top_5:
-                  trend = '↑' if opp['above_sma'] else '↓'
-                  msg += f\"\"\"
-          {opp['name']} ({opp['ticker']}) {trend}
-          \${opp['price']:.2f} | 5d: {opp['mom_5d']:+.1f}% | 20d: {opp['mom_20d']:+.1f}%
-          \"\"\"
+              msg += '(sorted by Edge Score)\\n'
+              msg += '-' * 30 + '\\n'
+              
+              for r in results:
+                  # Format market cap
+                  if r['market_cap_b'] >= 1:
+                      mcap = f\"\${r['market_cap_b']:.1f}B\"
+                  else:
+                      mcap = f\"\${r['market_cap_b']*1000:.0f}M\"
+                  
+                  msg += f'''
+          {r['name']} ({r['ticker']})
+          \${r['price']:.2f} | {mcap} | Score: {r['edge_score']}
+          5D: {r['mom_5d']:+.1f}% | Vol: {r['volume_change']:+.0f}%
+          Setup: {r['setup_type']}
+          Why: {r['why']}
+          Entry: \${r['support']:.2f} | Target: \${r['resistance']:.2f}
+          '''
           else:
-              msg += 'No strong setups today. Cash is a position.'
+              msg += 'No setups meeting criteria today.\\nCash is a position.'
 
           msg += '''
-
           ─────────────────
-          Full analysis: python launcher.py'''
+          Full scan: python launcher.py → Option 8'''
 
           send(msg)
-          print('Briefing sent!')
+          print('Alert sent!')
           "

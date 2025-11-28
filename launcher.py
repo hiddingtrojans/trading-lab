@@ -231,6 +231,14 @@ def advanced_tools():
         else:
             input("\nInvalid option. Press Enter...")
 
+def universe_scan():
+    """Scan 150+ small/mid caps for institutional accumulation."""
+    print("\n🔭 UNIVERSE SCANNER")
+    print("   Scanning 150+ small/mid cap stocks for edge signals...")
+    print("   (Volume anomalies, momentum, relative strength, setups)")
+    print("\n   This takes 2-3 minutes. Be patient.\n")
+    run_command("python src/alpha_lab/universe_scanner.py")
+
 def main():
     while True:
         clear_screen()
@@ -243,6 +251,7 @@ def main():
         print("   5. 🏥  Portfolio Health Check")
         print("   6. ☕  Daily Briefing (One-Click Research)")
         print("   7. 🔧  Advanced Tools")
+        print("   8. 🔭  Universe Scan (Find Edge)")
         print("   0. ❌  Exit")
         
         choice = input("\nSelect an option: ")
@@ -261,6 +270,8 @@ def main():
             daily_briefing()
         elif choice == "7":
             advanced_tools()
+        elif choice == "8":
+            universe_scan()
         elif choice == "0":
             print("\nGoodbye! Happy Trading.")
             sys.exit(0)
