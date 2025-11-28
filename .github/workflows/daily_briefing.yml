@@ -38,52 +38,61 @@ jobs:
               urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=30)
 
           import yfinance as yf
-          from alpha_lab.trade_scanner import TradeScanner, format_trade_signals
-          from alpha_lab.market_regime import MarketRegimeAnalyzer
-          from utils.data_fetcher import DataFetcher
-
-          # 1. REGIME CHECK
-          fetcher = DataFetcher(None)
-          regime = MarketRegimeAnalyzer(fetcher).analyze_regime()
+          import pandas as pd
           
-          emoji = {'GREEN': '🟢', 'YELLOW': '🟡', 'RED': '🔴'}.get(regime['status'], '⚪')
-          
-          # 2. SPY CONTEXT
-          spy = yf.Ticker('SPY').history(period='5d')
+          # Quick regime check (SPY vs SMA, VIX level)
+          spy = yf.Ticker('SPY').history(period='3mo')
           spy_price = spy['Close'].iloc[-1]
+          spy_sma50 = spy['Close'].rolling(50).mean().iloc[-1]
           spy_change = (spy['Close'].iloc[-1] / spy['Close'].iloc[-2] - 1) * 100
-
-          # 3. TRADE SIGNALS
+          
+          vix = yf.Ticker('^VIX').history(period='5d')
+          vix_level = vix['Close'].iloc[-1] if len(vix) > 0 else 20
+          
+          # Determine regime
+          if spy_price > spy_sma50 and vix_level < 20:
+              regime = 'GREEN'
+              emoji = '🟢'
+              action = 'Aggressive longs'
+          elif spy_price > spy_sma50 and vix_level < 30:
+              regime = 'YELLOW'
+              emoji = '🟡'
+              action = 'Selective longs, smaller size'
+          else:
+              regime = 'RED'
+              emoji = '🔴'
+              action = 'Reduce exposure, no new longs'
+          
+          # Run trade scanner
+          from alpha_lab.trade_scanner import TradeScanner
+          
           scanner = TradeScanner(risk_per_trade=500)
           signals = scanner.scan(top_n=5)
-
-          # 4. BUILD MESSAGE
-          msg = f'''{emoji} {regime['status']} | SPY \${spy_price:.2f} ({spy_change:+.1f}%)
-          {regime['action']}
+          
+          # Build message
+          msg = f'''{emoji} {regime} | SPY \${spy_price:.2f} ({spy_change:+.1f}%) | VIX {vix_level:.1f}
+          {action}
           '''
           
-          if regime['status'] == 'RED':
+          if regime == 'RED':
               msg += '''
-          No new longs. Reduce exposure.
+          No new longs today.
           '''
           elif signals:
-              msg += '''
-          TRADE SETUPS:
-          '''
               for s in signals:
-                  warning = f\"  {s['earnings_warning']}\" if s['earnings_warning'] else ''
+                  warning = f\"  {s['earnings_warning']}\" if s.get('earnings_warning') else ''
                   msg += f'''
           {s['action']}: {s['name']} ({s['ticker']})
-          Now: \${s['price']} | 5D: {s['mom_5d']:+.1f}%
-          Entry: \${s['entry']} | Stop: \${s['stop']} | Target: \${s['target']}
-          R:R 1:{s['rr_ratio']} | {s['shares']} shares (\${s['risk_amount']:.0f} risk)
+          \${s['price']} | 5D: {s['mom_5d']:+.1f}%
+          Entry \${s['entry']} | Stop \${s['stop']} | Target \${s['target']}
+          R:R 1:{s['rr_ratio']} | {s['shares']} sh (\${s['risk_amount']:.0f} risk)
           {s['reason']}{warning}
           '''
           else:
               msg += '''
-          No clean setups. Wait for better entries.
+          No clean setups. Cash is a position.
           '''
-
+          
           send(msg)
           print('Signals sent!')
           "
