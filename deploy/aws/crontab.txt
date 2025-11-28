@@ -1,0 +1,58 @@
+# Trading Scanner Cron Jobs
+# Install with: crontab ~/scanner/deploy/aws/crontab.txt
+#
+# All times in UTC (adjust for your timezone)
+# Market hours: 9:30 AM - 4:00 PM ET = 13:30 - 20:00 UTC
+
+SHELL=/bin/bash
+PATH=/home/ubuntu/scanner/venv/bin:/usr/local/bin:/usr/bin:/bin
+SCANNER_DIR=/home/ubuntu/scanner
+
+# ============================================
+# MORNING PREP (before market open)
+# ============================================
+
+# 9:00 AM ET - Daily signals + regime check
+0 13 * * 1-5 cd $SCANNER_DIR && source venv/bin/activate && python src/alpha_lab/daily_briefing.py >> logs/daily.log 2>&1
+
+# ============================================
+# MARKET HOURS (9:30 AM - 4:00 PM ET)
+# ============================================
+
+# Options flow scan every 30 minutes during market hours
+30 13 * * 1-5 cd $SCANNER_DIR && source venv/bin/activate && python src/alpha_lab/options_flow_scanner.py --scan >> logs/options_flow.log 2>&1
+0,30 14-19 * * 1-5 cd $SCANNER_DIR && source venv/bin/activate && python src/alpha_lab/options_flow_scanner.py --scan >> logs/options_flow.log 2>&1
+
+# Position check every hour during market hours
+0 14-20 * * 1-5 cd $SCANNER_DIR && source venv/bin/activate && python src/alpha_lab/position_monitor.py --check >> logs/positions.log 2>&1
+
+# Regime check at 11 AM and 2 PM ET
+0 15,18 * * 1-5 cd $SCANNER_DIR && source venv/bin/activate && python src/alpha_lab/position_monitor.py --regime >> logs/regime.log 2>&1
+
+# ============================================
+# END OF DAY
+# ============================================
+
+# 4:30 PM ET - EOD Summary
+30 20 * * 1-5 cd $SCANNER_DIR && source venv/bin/activate && python src/alpha_lab/position_monitor.py --eod >> logs/eod.log 2>&1
+
+# ============================================
+# WEEKLY
+# ============================================
+
+# Friday 5 PM ET - Weekly performance report
+0 21 * * 5 cd $SCANNER_DIR && source venv/bin/activate && python src/alpha_lab/performance_checker.py --report >> logs/performance.log 2>&1
+
+# ============================================
+# MAINTENANCE
+# ============================================
+
+# Daily at midnight - Rotate logs
+0 4 * * * find $SCANNER_DIR/logs -name "*.log" -mtime +7 -delete
+
+# Every 6 hours - Check IB Gateway is running
+0 */6 * * * pgrep -f "ibgateway" || (echo "IB Gateway down" | python -c "from alpha_lab.telegram_alerts import send_message; send_message('⚠️ IB Gateway is down! Restart needed.')")
+
+# Sunday 2 AM - Pull latest code
+0 6 * * 0 cd $SCANNER_DIR && git pull && source venv/bin/activate && pip install -r requirements.txt -q
+
