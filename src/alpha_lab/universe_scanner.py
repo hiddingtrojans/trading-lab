@@ -166,13 +166,30 @@ class UniverseScanner:
         # === SCORE 4: Technical Setup (15%) ===
         tech_score, setup_type = self._calc_technical_setup(hist)
         
+        # === EXTENSION FILTER ===
+        # Reject stocks that already made the move - you're chasing, not catching
+        mom_5d = (hist['Close'].iloc[-1] / hist['Close'].iloc[-5] - 1) * 100
+        
+        # Hard reject: Already ran 20%+ in 5 days
+        if mom_5d > 20:
+            return None
+        
+        # Penalize extended stocks (reduces edge score)
+        extension_penalty = 0
+        if mom_5d > 15:
+            extension_penalty = 30  # Heavy penalty - likely too late
+        elif mom_5d > 10:
+            extension_penalty = 15  # Moderate penalty - proceed with caution
+        elif mom_5d > 7:
+            extension_penalty = 5   # Minor penalty
+        
         # === COMBINED EDGE SCORE ===
         edge_score = (
             volume_score * 0.40 +
             momentum_score * 0.25 +
             rs_score * 0.20 +
             tech_score * 0.15
-        )
+        ) - extension_penalty
         
         # Only return if score is meaningful
         if edge_score < 50:
@@ -349,10 +366,20 @@ class UniverseScanner:
         setup_type = "NONE"
         score = 40
         
+        # Check if breakout is FRESH (compare to high from 5+ days ago)
+        high_before_5d = hist['High'].iloc[:-5].max() if len(hist) > 5 else high_20
+        
         # Breakout: Price near/above 20-day high
         if price >= high_20 * 0.98:
-            setup_type = "BREAKOUT"
-            score = 85
+            # Only reward if this is a FRESH breakout (just broke above prior high)
+            if price > high_before_5d * 1.02:
+                # Already extended above old resistance - chasing
+                setup_type = "EXTENDED"
+                score = 35
+            else:
+                # Fresh breakout - catching the move
+                setup_type = "BREAKOUT"
+                score = 85
         
         # Pullback to support: Price near SMA20 in uptrend
         elif price > sma50 and abs(price - sma20) / price < 0.02:
@@ -398,11 +425,13 @@ class UniverseScanner:
             reasons.append("Outperforming SPY")
         
         if setup_type == "BREAKOUT":
-            reasons.append("Breaking out")
+            reasons.append("Fresh breakout")
         elif setup_type == "PULLBACK":
             reasons.append("Pullback to support")
         elif setup_type == "CONSOLIDATION":
             reasons.append("Tight consolidation")
+        elif setup_type == "EXTENDED":
+            reasons.append("Extended - wait for pullback")
         
         return " + ".join(reasons) if reasons else "Mixed signals"
 
