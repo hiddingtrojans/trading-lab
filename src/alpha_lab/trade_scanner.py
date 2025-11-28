@@ -22,14 +22,32 @@ sys.path.insert(0, os.path.join(project_root, 'src'))
 import yfinance as yf
 
 from alpha_lab.universes import get_universe
+from alpha_lab.config import get_config
 
 
 class TradeScanner:
     """Generate actionable trade signals."""
     
-    def __init__(self, risk_per_trade: float = 500, universe: str = 'tradeable'):
-        self.risk_per_trade = risk_per_trade
+    def __init__(self, risk_per_trade: float = None, universe: str = 'tradeable'):
+        # Load from config, allow override
+        self.risk_per_trade = risk_per_trade or get_config('account.risk_per_trade', 500)
         self.universe = get_universe(universe)
+        
+        # Load all thresholds from config
+        self.cfg = {
+            'min_price': get_config('filters.min_price', 3),
+            'min_volume': get_config('filters.min_avg_volume', 500000),
+            'extension_reject': get_config('extension.hard_reject_5d', 20),
+            'fresh_threshold': get_config('breakout.fresh_threshold', 1.05),
+            'volume_surge': get_config('breakout.volume_surge', 1.5),
+            'price_near_high': get_config('breakout.price_near_high', 0.98),
+            'sma_tolerance': get_config('pullback.sma_tolerance', 0.02),
+            'min_20d_momentum': get_config('pullback.min_20d_momentum', 5),
+            'consolidation_range': get_config('consolidation.max_range_pct', 0.08),
+            'stop_atr_mult': get_config('risk_reward.stop_atr_multiplier', 1.5),
+            'target_atr_mult': get_config('risk_reward.target_atr_multiplier', 3.0),
+            'atr_period': get_config('indicators.atr_period', 14),
+        }
         
     def scan(self, top_n: int = 5) -> List[Dict]:
         """Scan for trade setups. Returns actionable signals only."""
@@ -60,12 +78,12 @@ class TradeScanner:
         info = stock.info or {}
         price = hist['Close'].iloc[-1]
         
-        # Skip penny stocks and illiquid
-        if price < 3 or hist['Volume'].mean() < 500000:
+        # Skip penny stocks and illiquid (from config)
+        if price < self.cfg['min_price'] or hist['Volume'].mean() < self.cfg['min_volume']:
             return None
         
         # === Calculate levels ===
-        atr = self._calc_atr(hist)
+        atr = self._calc_atr(hist, self.cfg['atr_period'])
         sma20 = hist['Close'].rolling(20).mean().iloc[-1]
         sma50 = hist['Close'].rolling(50).mean().iloc[-1] if len(hist) >= 50 else sma20
         high_20 = hist['High'].rolling(20).max().iloc[-1]
@@ -75,10 +93,9 @@ class TradeScanner:
         mom_5d = (price / hist['Close'].iloc[-5] - 1) * 100
         mom_20d = (price / hist['Close'].iloc[-20] - 1) * 100
         
-        # === EXTENSION FILTER ===
-        # Reject stocks that already made the move - you're chasing
-        if mom_5d > 20:
-            return None  # Hard reject: already ran 20%+ in 5 days
+        # === EXTENSION FILTER (from config) ===
+        if mom_5d > self.cfg['extension_reject']:
+            return None
         
         # Volume surge
         vol_ratio = hist['Volume'].iloc[-5:].mean() / hist['Volume'].iloc[-25:-5].mean()
@@ -90,35 +107,38 @@ class TradeScanner:
         target = None
         reason = ''
         
-        # Check if breakout is fresh (not extended)
+        # Check if breakout is fresh (from config)
         high_before_5d = hist['High'].iloc[:-5].max() if len(hist) > 5 else high_20
-        is_fresh_breakout = price <= high_before_5d * 1.05  # Within 5% of prior resistance
+        is_fresh_breakout = price <= high_before_5d * self.cfg['fresh_threshold']
         
         # SETUP 1: Breakout with volume (only if FRESH)
-        if price >= high_20 * 0.98 and vol_ratio > 1.5 and mom_5d > 0 and is_fresh_breakout:
+        near_high = price >= high_20 * self.cfg['price_near_high']
+        vol_surge = vol_ratio > self.cfg['volume_surge']
+        
+        if near_high and vol_surge and mom_5d > 0 and is_fresh_breakout:
             action = 'BUY NOW'
             entry = round(price, 2)
-            stop = round(price - 1.5 * atr, 2)
-            target = round(price + 3 * atr, 2)
+            stop = round(price - self.cfg['stop_atr_mult'] * atr, 2)
+            target = round(price + self.cfg['target_atr_mult'] * atr, 2)
             reason = f"Breakout + Vol surge ({vol_ratio:.1f}x)"
         
         # Extended breakout - already ran, wait for pullback
-        elif price >= high_20 * 0.98 and vol_ratio > 1.5 and not is_fresh_breakout:
-            action = 'WAIT'  # Don't chase
+        elif near_high and vol_surge and not is_fresh_breakout:
+            action = 'WAIT'
             reason = f"Extended +{mom_5d:.0f}% - wait for pullback"
         
-        # SETUP 2: Pullback to SMA20 in uptrend
-        elif price > sma50 and abs(price - sma20) / price < 0.02 and mom_20d > 5:
+        # SETUP 2: Pullback to SMA20 in uptrend (from config)
+        elif price > sma50 and abs(price - sma20) / price < self.cfg['sma_tolerance'] and mom_20d > self.cfg['min_20d_momentum']:
             action = 'BUY PULLBACK'
             entry = round(sma20, 2)
-            stop = round(sma20 - 1.5 * atr, 2)
+            stop = round(sma20 - self.cfg['stop_atr_mult'] * atr, 2)
             target = round(high_20, 2)
             reason = f"Pullback to SMA20, uptrend intact"
         
-        # SETUP 3: Consolidation breakout watch
-        elif (high_20 - low_20) / price < 0.08 and price > sma20:
+        # SETUP 3: Consolidation breakout watch (from config)
+        elif (high_20 - low_20) / price < self.cfg['consolidation_range'] and price > sma20:
             action = 'WATCH'
-            entry = round(high_20 * 1.01, 2)  # Buy on breakout
+            entry = round(high_20 * 1.01, 2)
             stop = round(low_20 * 0.98, 2)
             target = round(high_20 + (high_20 - low_20), 2)
             reason = f"Tight range, wait for breakout above ${high_20:.2f}"

@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(project_root, 'src'))
 import yfinance as yf
 
 from alpha_lab.universes import SMALL_CAP, MID_CAP, get_universe
+from alpha_lab.config import get_config
 
 
 class UniverseScanner:
@@ -41,6 +42,21 @@ class UniverseScanner:
             self.universe = get_universe('tradeable')
         else:
             self.universe = SMALL_CAP.copy()
+        
+        # Load thresholds from config
+        self.cfg = {
+            'min_price': get_config('filters.min_price', 1),
+            'min_volume': get_config('filters.min_avg_volume', 500000),
+            'min_market_cap': get_config('filters.min_market_cap', 300000000),
+            'extension_reject': get_config('extension.hard_reject_5d', 20),
+            'penalty_high': get_config('extension.penalty_threshold_high', 15),
+            'penalty_mid': get_config('extension.penalty_threshold_mid', 10),
+            'penalty_low': get_config('extension.penalty_threshold_low', 7),
+            'penalty_high_val': get_config('extension.penalty_high', 30),
+            'penalty_mid_val': get_config('extension.penalty_mid', 15),
+            'penalty_low_val': get_config('extension.penalty_low', 5),
+            'fresh_threshold': get_config('breakout.fresh_threshold', 1.05),
+        }
         
     def scan(self, top_n: int = 10) -> List[Dict]:
         """
@@ -97,17 +113,17 @@ class UniverseScanner:
         except:
             info = {}
         
-        # === FILTER 1: Basic sanity ===
+        # === FILTER 1: Basic sanity (from config) ===
         price = hist['Close'].iloc[-1]
-        if price < 1:  # Penny stock
+        if price < self.cfg['min_price']:
             return None
         
         avg_volume = hist['Volume'].mean()
-        if avg_volume < 500000:  # Too illiquid
+        if avg_volume < self.cfg['min_volume']:
             return None
         
         market_cap = info.get('marketCap', 0)
-        if market_cap and market_cap < 300_000_000:  # Below $300M
+        if market_cap and market_cap < self.cfg['min_market_cap']:
             return None
         
         # === SCORE 1: Volume Anomaly (40%) ===
@@ -122,22 +138,21 @@ class UniverseScanner:
         # === SCORE 4: Technical Setup (15%) ===
         tech_score, setup_type = self._calc_technical_setup(hist)
         
-        # === EXTENSION FILTER ===
-        # Reject stocks that already made the move - you're chasing, not catching
+        # === EXTENSION FILTER (from config) ===
         mom_5d = (hist['Close'].iloc[-1] / hist['Close'].iloc[-5] - 1) * 100
         
-        # Hard reject: Already ran 20%+ in 5 days
-        if mom_5d > 20:
+        # Hard reject
+        if mom_5d > self.cfg['extension_reject']:
             return None
         
-        # Penalize extended stocks (reduces edge score)
+        # Penalize extended stocks (from config)
         extension_penalty = 0
-        if mom_5d > 15:
-            extension_penalty = 30  # Heavy penalty - likely too late
-        elif mom_5d > 10:
-            extension_penalty = 15  # Moderate penalty - proceed with caution
-        elif mom_5d > 7:
-            extension_penalty = 5   # Minor penalty
+        if mom_5d > self.cfg['penalty_high']:
+            extension_penalty = self.cfg['penalty_high_val']
+        elif mom_5d > self.cfg['penalty_mid']:
+            extension_penalty = self.cfg['penalty_mid_val']
+        elif mom_5d > self.cfg['penalty_low']:
+            extension_penalty = self.cfg['penalty_low_val']
         
         # === COMBINED EDGE SCORE ===
         edge_score = (
