@@ -196,6 +196,19 @@ def correlation_check():
     if not tickers: return
     run_command(f'python -c "from src.alpha_lab.correlation_filter import CorrelationFilter; cf=CorrelationFilter(); cf.print_analysis([\'{t.strip()}\' for t in \'{tickers}\'.split(\',\')])"')
 
+def position_dashboard():
+    """Show position dashboard."""
+    print("\n💼 POSITION DASHBOARD")
+    run_command("python src/alpha_lab/position_manager.py")
+
+def add_position():
+    """Add a new position."""
+    run_command("python src/alpha_lab/position_manager.py add")
+
+def close_position():
+    """Close a position."""
+    run_command("python src/alpha_lab/position_manager.py close")
+
 def advanced_tools():
     while True:
         clear_screen()
@@ -208,6 +221,9 @@ def advanced_tools():
         print("   4. 📈  Multi-Timeframe Check")
         print("   5. 🔗  Portfolio Correlation")
         print("   6. ⏰  Start Scheduler (Daemon)")
+        print("   7. 💼  Position Dashboard")
+        print("   8. ➕  Add Position")
+        print("   9. ➖  Close Position")
         print("   0. ⬅️   Back to Main Menu")
         
         choice = input("\nSelect: ")
@@ -226,6 +242,12 @@ def advanced_tools():
             print("\nStarting scheduler daemon...")
             print("Press Ctrl+C to stop")
             run_command("python src/alpha_lab/scheduler.py --daemon")
+        elif choice == "7":
+            position_dashboard()
+        elif choice == "8":
+            add_position()
+        elif choice == "9":
+            close_position()
         elif choice == "0":
             break
         else:
