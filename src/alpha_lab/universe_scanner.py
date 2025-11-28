@@ -26,6 +26,8 @@ sys.path.insert(0, os.path.join(project_root, 'src'))
 
 import yfinance as yf
 
+from alpha_lab.universes import SMALL_CAP, MID_CAP, get_universe
+
 
 class UniverseScanner:
     """
@@ -34,57 +36,11 @@ class UniverseScanner:
     The edge: Find stocks where smart money is entering BEFORE the move.
     """
     
-    # Russell 2000 proxy - top small caps by sector
-    # In production, you'd pull this from an API
-    SMALL_CAP_UNIVERSE = [
-        # Technology - High Growth
-        'SMCI', 'CRDO', 'AEHR', 'IONQ', 'RGTI', 'QUBT', 'KULR', 'SOUN', 'BBAI', 'BIGC',
-        'APP', 'DUOL', 'GLBE', 'TOST', 'BILL', 'PCOR', 'BRZE', 'DOCN', 'GTLB', 'MDB',
-        'NET', 'CFLT', 'ESTC', 'DDOG', 'ZS', 'CRWD', 'PANW', 'FTNT', 'OKTA', 'CYBR',
-        
-        # Biotech/Healthcare - Binary events
-        'MRNA', 'BNTX', 'NVAX', 'SRRK', 'ARCT', 'VKTX', 'AKRO', 'MDGL', 'CRNX', 'BMRN',
-        'EXAS', 'NTRA', 'ILMN', 'TWST', 'CDNA', 'GH', 'PACB', 'RXRX', 'DNA', 'BEAM',
-        
-        # Consumer/Retail - Turnarounds
-        'BIRD', 'BROS', 'CAVA', 'SHAK', 'WING', 'CMG', 'TXRH', 'DRI', 'EAT', 'PLAY',
-        'LULU', 'DECK', 'ONON', 'SKX', 'CROX', 'ANF', 'GPS', 'AEO', 'URBN', 'GOOS',
-        
-        # Financials - Regional growth
-        'SOFI', 'UPST', 'AFRM', 'LC', 'HOOD', 'COIN', 'MARA', 'RIOT', 'CLSK', 'HUT',
-        'WAL', 'EWBC', 'PACW', 'FRC', 'SIVB', 'SBNY', 'NYCB', 'VLY', 'FFBC', 'GBCI',
-        
-        # Industrials - Infrastructure play
-        'BLDR', 'GNRC', 'STEM', 'BEEM', 'CHPT', 'EVGO', 'BLNK', 'ENVX', 'QS', 'LCID',
-        'RIVN', 'FSR', 'GOEV', 'NKLA', 'HYLN', 'XOS', 'PTRA', 'LEV', 'ARVL', 'REE',
-        
-        # Energy - Transition plays
-        'FSLR', 'ENPH', 'SEDG', 'RUN', 'NOVA', 'ARRY', 'MAXN', 'JKS', 'CSIQ', 'DQ',
-        'PLUG', 'BLDP', 'BE', 'BLOOM', 'NEE', 'AES', 'VST', 'CEG', 'NRG', 'FCEL',
-        
-        # High volatility plays - Meme adjacent
-        'GME', 'AMC', 'BBBY', 'KOSS', 'EXPR', 'BB', 'NOK', 'CLOV', 'WISH', 'SDC',
-        'PLTR', 'SNOW', 'U', 'RBLX', 'DKNG', 'PENN', 'BALY', 'RSI', 'GENI', 'SKLZ',
-        
-        # Recent IPOs / SPACs - Underfollowed
-        'ARM', 'BIRK', 'CART', 'KVYO', 'VRT', 'ASPI', 'RDDT', 'IBKR', 'GRAB', 'SE',
-        'NU', 'STNE', 'PAGS', 'XP', 'MELI', 'GLOB', 'DLO', 'FOUR', 'PGY', 'ZETA',
-    ]
-    
-    # Mid caps for more stability
-    MID_CAP_UNIVERSE = [
-        'ABNB', 'DASH', 'UBER', 'LYFT', 'RDFN', 'Z', 'OPEN', 'CVNA', 'CARG', 'VRM',
-        'TTD', 'ROKU', 'SPOT', 'SNAP', 'PINS', 'MTCH', 'BMBL', 'ETSY', 'CHWY', 'W',
-        'SQ', 'PYPL', 'SHOP', 'MKTX', 'VIRT', 'LPLA', 'RJF', 'SEIC', 'IBKR', 'SCHW',
-        'WDAY', 'NOW', 'CRM', 'VEEV', 'HUBS', 'ZM', 'DOCU', 'BOX', 'DBX', 'FROG',
-    ]
-    
     def __init__(self, include_mid_caps: bool = True):
-        self.universe = self.SMALL_CAP_UNIVERSE.copy()
         if include_mid_caps:
-            self.universe.extend(self.MID_CAP_UNIVERSE)
-        # Remove duplicates
-        self.universe = list(set(self.universe))
+            self.universe = get_universe('tradeable')
+        else:
+            self.universe = SMALL_CAP.copy()
         
     def scan(self, top_n: int = 10) -> List[Dict]:
         """

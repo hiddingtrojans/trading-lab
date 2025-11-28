@@ -21,42 +21,23 @@ sys.path.insert(0, os.path.join(project_root, 'src'))
 
 import yfinance as yf
 
+from alpha_lab.universes import get_universe
+
 
 class TradeScanner:
     """Generate actionable trade signals."""
     
-    # Focus on liquid, tradeable names
-    UNIVERSE = [
-        # Tech momentum
-        'SMCI', 'CRDO', 'APP', 'IONQ', 'SOUN', 'PLTR', 'SNOW', 'NET', 'CRWD', 'DDOG',
-        'MDB', 'ZS', 'PANW', 'OKTA', 'FTNT', 'DOCN', 'GTLB', 'CFLT', 'ESTC', 'DUOL',
-        
-        # Biotech
-        'EXAS', 'NTRA', 'ILMN', 'PACB', 'RXRX', 'BEAM', 'MRNA', 'VKTX', 'AKRO', 'MDGL',
-        
-        # Consumer
-        'CAVA', 'SHAK', 'BROS', 'ANF', 'DECK', 'ONON', 'CROX', 'LULU', 'CMG', 'WING',
-        
-        # Fintech
-        'SOFI', 'HOOD', 'COIN', 'AFRM', 'UPST', 'SQ', 'MARA', 'RIOT', 'CLSK',
-        
-        # Mid cap growth
-        'UBER', 'ABNB', 'DASH', 'RDFN', 'TTD', 'ROKU', 'SPOT', 'SNAP', 'PINS', 'ETSY',
-        
-        # Recent movers
-        'ARM', 'RDDT', 'VRT', 'BIRK', 'NU', 'SE', 'MELI', 'GLOB',
-    ]
-    
-    def __init__(self, risk_per_trade: float = 500):
+    def __init__(self, risk_per_trade: float = 500, universe: str = 'tradeable'):
         self.risk_per_trade = risk_per_trade
+        self.universe = get_universe(universe)
         
     def scan(self, top_n: int = 5) -> List[Dict]:
         """Scan for trade setups. Returns actionable signals only."""
         results = []
         
-        print(f"Scanning {len(self.UNIVERSE)} stocks for trade setups...")
+        print(f"Scanning {len(self.universe)} stocks for trade setups...")
         
-        for ticker in self.UNIVERSE:
+        for ticker in self.universe:
             try:
                 signal = self._analyze(ticker)
                 if signal and signal['action'] != 'WAIT':
@@ -94,6 +75,11 @@ class TradeScanner:
         mom_5d = (price / hist['Close'].iloc[-5] - 1) * 100
         mom_20d = (price / hist['Close'].iloc[-20] - 1) * 100
         
+        # === EXTENSION FILTER ===
+        # Reject stocks that already made the move - you're chasing
+        if mom_5d > 20:
+            return None  # Hard reject: already ran 20%+ in 5 days
+        
         # Volume surge
         vol_ratio = hist['Volume'].iloc[-5:].mean() / hist['Volume'].iloc[-25:-5].mean()
         
@@ -104,13 +90,22 @@ class TradeScanner:
         target = None
         reason = ''
         
-        # SETUP 1: Breakout with volume
-        if price >= high_20 * 0.98 and vol_ratio > 1.5 and mom_5d > 0:
+        # Check if breakout is fresh (not extended)
+        high_before_5d = hist['High'].iloc[:-5].max() if len(hist) > 5 else high_20
+        is_fresh_breakout = price <= high_before_5d * 1.05  # Within 5% of prior resistance
+        
+        # SETUP 1: Breakout with volume (only if FRESH)
+        if price >= high_20 * 0.98 and vol_ratio > 1.5 and mom_5d > 0 and is_fresh_breakout:
             action = 'BUY NOW'
             entry = round(price, 2)
             stop = round(price - 1.5 * atr, 2)
             target = round(price + 3 * atr, 2)
             reason = f"Breakout + Vol surge ({vol_ratio:.1f}x)"
+        
+        # Extended breakout - already ran, wait for pullback
+        elif price >= high_20 * 0.98 and vol_ratio > 1.5 and not is_fresh_breakout:
+            action = 'WAIT'  # Don't chase
+            reason = f"Extended +{mom_5d:.0f}% - wait for pullback"
         
         # SETUP 2: Pullback to SMA20 in uptrend
         elif price > sma50 and abs(price - sma20) / price < 0.02 and mom_20d > 5:
