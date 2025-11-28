@@ -290,6 +290,26 @@ def options_flow_scanner():
         if tickers:
             run_command(f"python src/alpha_lab/options_flow_scanner.py --tickers {tickers}")
 
+def position_monitor():
+    """Monitor positions for stop/target alerts."""
+    print("\n🎯 POSITION MONITOR")
+    print("   Checks positions against live prices.")
+    print("   Sends Telegram alerts when stop/target hit.\n")
+    
+    print("   1. One-time Check")
+    print("   2. Continuous Monitoring (daemon)")
+    print("   3. Send EOD Summary")
+    
+    choice = input("\n   Enter choice (1-3): ")
+    
+    if choice == "1":
+        run_command("python src/alpha_lab/position_monitor.py")
+    elif choice == "2":
+        print("\n   Running continuous monitor. Press Ctrl+C to stop.")
+        run_command("python src/alpha_lab/position_monitor.py --daemon --interval 60")
+    elif choice == "3":
+        run_command("python src/alpha_lab/position_monitor.py --eod")
+
 def main():
     while True:
         clear_screen()
@@ -305,6 +325,7 @@ def main():
         print("   8. 🔭  Universe Scan (Find Edge)")
         print("   9. 📈  Performance Check (Did Signals Work?)")
         print("  10. 💰  Options Flow Scanner (IBKR)")
+        print("  11. 🎯  Position Monitor (Stop/Target Alerts)")
         print("   0. ❌  Exit")
         
         choice = input("\nSelect an option: ")
@@ -329,6 +350,8 @@ def main():
             check_performance()
         elif choice == "10":
             options_flow_scanner()
+        elif choice == "11":
+            position_monitor()
         elif choice == "0":
             print("\nGoodbye! Happy Trading.")
             sys.exit(0)

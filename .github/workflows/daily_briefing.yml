@@ -1,4 +1,4 @@
-name: Trade Signals
+name: Daily Trade Signals
 
 on:
   schedule:
@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  scan:
+  signals:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     
     steps:
       - uses: actions/checkout@v4
@@ -17,82 +17,54 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       
-      - run: pip install yfinance pandas numpy
+      - run: pip install yfinance pandas numpy pyyaml scipy
       
-      - name: Scan and Send Signals
+      - name: Generate and Send Signals
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python -c "
-          import os, sys, urllib.request, urllib.parse
-          from datetime import datetime
+          import sys
           sys.path.insert(0, 'src')
-
-          token = os.environ['TELEGRAM_BOT_TOKEN']
-          chat_id = os.environ['TELEGRAM_CHAT_ID']
-
-          def send(msg):
-              url = f'https://api.telegram.org/bot{token}/sendMessage'
-              data = urllib.parse.urlencode({'chat_id': chat_id, 'text': msg}).encode()
-              urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=30)
-
+          
           import yfinance as yf
-          import pandas as pd
-          
-          # Quick regime check (SPY vs SMA, VIX level)
-          spy = yf.Ticker('SPY').history(period='3mo')
-          spy_price = spy['Close'].iloc[-1]
-          spy_sma50 = spy['Close'].rolling(50).mean().iloc[-1]
-          spy_change = (spy['Close'].iloc[-1] / spy['Close'].iloc[-2] - 1) * 100
-          
-          vix = yf.Ticker('^VIX').history(period='5d')
-          vix_level = vix['Close'].iloc[-1] if len(vix) > 0 else 20
-          
-          # Determine regime
-          if spy_price > spy_sma50 and vix_level < 20:
-              regime = 'GREEN'
-              emoji = '🟢'
-              action = 'Aggressive longs'
-          elif spy_price > spy_sma50 and vix_level < 30:
-              regime = 'YELLOW'
-              emoji = '🟡'
-              action = 'Selective longs, smaller size'
-          else:
-              regime = 'RED'
-              emoji = '🔴'
-              action = 'Reduce exposure, no new longs'
-          
-          # Run trade scanner
           from alpha_lab.trade_scanner import TradeScanner
+          from alpha_lab.telegram_alerts import TelegramAlerter
           
-          scanner = TradeScanner(risk_per_trade=500)
-          signals = scanner.scan(top_n=5)
+          print('Getting market regime...')
           
-          # Build message
-          msg = f'''{emoji} {regime} | SPY \${spy_price:.2f} ({spy_change:+.1f}%) | VIX {vix_level:.1f}
-          {action}
-          '''
+          # Get regime
+          spy = yf.Ticker('SPY')
+          hist = spy.history(period='3mo')
+          spy_price = hist['Close'].iloc[-1]
+          spy_sma50 = hist['Close'].rolling(50).mean().iloc[-1]
+          spy_change = (hist['Close'].iloc[-1] / hist['Close'].iloc[-2] - 1) * 100
           
-          if regime == 'RED':
-              msg += '''
-          No new longs today.
-          '''
-          elif signals:
-              for s in signals:
-                  warning = f\"  {s['earnings_warning']}\" if s.get('earnings_warning') else ''
-                  msg += f'''
-          {s['action']}: {s['name']} ({s['ticker']})
-          \${s['price']} | 5D: {s['mom_5d']:+.1f}%
-          Entry \${s['entry']} | Stop \${s['stop']} | Target \${s['target']}
-          R:R 1:{s['rr_ratio']} | {s['shares']} sh (\${s['risk_amount']:.0f} risk)
-          {s['reason']}{warning}
-          '''
+          vix = yf.Ticker('^VIX')
+          vix_hist = vix.history(period='5d')
+          vix_level = vix_hist['Close'].iloc[-1] if len(vix_hist) > 0 else 20
+          
+          if spy_price > spy_sma50 and vix_level < 20:
+              regime = {'status': 'GREEN', 'action': 'Aggressive longs', 'spy_price': spy_price}
+          elif spy_price > spy_sma50 and vix_level < 30:
+              regime = {'status': 'YELLOW', 'action': 'Selective, smaller size', 'spy_price': spy_price}
           else:
-              msg += '''
-          No clean setups. Cash is a position.
-          '''
+              regime = {'status': 'RED', 'action': 'No new longs', 'spy_price': spy_price}
           
-          send(msg)
+          print(f'Regime: {regime[\"status\"]}')
+          
+          # Get signals (skip if RED)
+          signals = []
+          if regime['status'] != 'RED':
+              print('Scanning for signals...')
+              scanner = TradeScanner(risk_per_trade=500)
+              signals = scanner.scan(top_n=5, check_breadth=False)  # Breadth check needs IBKR
+              print(f'Found {len(signals)} signals')
+          
+          # Send via unified alerter
+          alerter = TelegramAlerter()
+          alerter.send_signal_alert(signals, regime)
+          
           print('Signals sent!')
           "

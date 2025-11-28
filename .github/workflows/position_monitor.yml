@@ -1,0 +1,79 @@
+name: Position Monitor
+
+on:
+  schedule:
+    # Check every hour during market hours (9:30 AM - 4 PM ET)
+    - cron: '30 14-20 * * 1-5'  # 9:30 AM - 3:30 PM ET
+    # EOD summary at 4:30 PM ET
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Mode to run'
+        required: false
+        default: 'check'
+        type: choice
+        options:
+          - check
+          - eod
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - run: pip install yfinance pandas numpy pyyaml
+      
+      - name: Download position state
+        continue-on-error: true
+        run: |
+          # In a real setup, you'd fetch positions from a persistent store
+          # For now, we create an empty positions file if none exists
+          mkdir -p data
+          if [ ! -f data/positions.json ]; then
+            echo '{"positions": [], "closed": [], "settings": {"account_size": 100000}}' > data/positions.json
+          fi
+      
+      - name: Check Positions
+        if: github.event.schedule != '30 21 * * 1-5' && github.event.inputs.mode != 'eod'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, 'src')
+          from alpha_lab.position_monitor import PositionMonitor
+          
+          monitor = PositionMonitor()
+          alerts = monitor.check_positions()
+          
+          if alerts:
+              print(f'Sent {len(alerts)} alerts')
+          else:
+              print('No alerts needed')
+          "
+      
+      - name: EOD Summary
+        if: github.event.schedule == '30 21 * * 1-5' || github.event.inputs.mode == 'eod'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, 'src')
+          from alpha_lab.position_monitor import PositionMonitor
+          
+          monitor = PositionMonitor()
+          monitor.send_eod_summary()
+          print('EOD summary sent')
+          "
+
