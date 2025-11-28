@@ -10,15 +10,16 @@ Every morning at 8:30 AM (before US market opens), you receive a Telegram messag
 
 ```
 🟢 GREEN | SPY $679.68 (+0.7%) | VIX 13.5
+Market breadth: OK (62% above SMA50)
 Aggressive longs
 
-BUY NOW: Exact Sciences (EXAS)
+[A] BUY NOW: Exact Sciences (EXAS)
 $101.45 | 5D: +0.8%
 Entry $101.45 | Stop $95.43 | Target $113.48
-R:R 1:2.0 | 83 sh ($500 risk)
+R:R 1:2.5 | 83 sh ($500 risk)
 Breakout + Vol surge (6.2x)
 
-BUY PULLBACK: DigitalOcean (DOCN)
+[B] BUY PULLBACK: DigitalOcean (DOCN)
 $44.86 | 5D: +2.1%
 Entry $44.86 | Stop $40.67 | Target $52.20
 R:R 1:1.8 | 119 sh ($499 risk)
@@ -27,9 +28,22 @@ Pullback to SMA20, uptrend intact
 
 **In plain English:** The system tells you:
 - Is today a good day to buy stocks? (GREEN = yes, RED = no)
-- Which stocks look promising right now
+- Is the broader market healthy? (breadth check)
+- Which stocks look promising, graded by quality [A], [B], [C]
 - Exactly where to buy, where to set your stop loss, and where to take profit
 - How many shares to buy if you want to risk $500
+
+### What's NEW in this version
+
+| Feature | What it does |
+|---------|--------------|
+| **Signal Grading** | Signals rated A/B/C. Grade A = highest confidence setups |
+| **Market Breadth** | Won't signal in weak markets (<40% stocks above SMA50) |
+| **Earnings Blackout** | Won't signal stocks within 5 days of earnings |
+| **Extension Filter** | Won't chase stocks that already ran 20%+ in 5 days |
+| **Performance Tracking** | Track if past signals actually worked |
+| **Position Management** | Track your open positions and risk exposure |
+| **Config System** | All thresholds in one YAML file - tune without code changes |
 
 ---
 
@@ -104,6 +118,32 @@ Two types of setups:
 - Stock was going up, then dipped a bit
 - You're buying "on sale"
 - Risk: The dip might continue
+
+### What is Signal Grading [A]/[B]/[C]?
+
+Not all signals are equal. The system grades each one:
+
+| Grade | Meaning | Criteria |
+|-------|---------|----------|
+| **[A]** | Highest confidence | R:R >= 2.5, Volume >= 2x, Extension <= 5% |
+| **[B]** | Good setup | R:R >= 1.5, Volume >= 1.5x, Extension <= 10% |
+| **[C]** | Marginal | Passes filters but lower quality |
+
+**Focus on Grade A signals first.** They have the best risk/reward and aren't chasing.
+
+### What is Market Breadth?
+
+Breadth measures market health by checking how many stocks are in uptrends:
+
+- **Strong (>60%)**: Most stocks going up - full size longs OK
+- **Neutral (40-60%)**: Mixed market - be selective
+- **Weak (<40%)**: Most stocks falling - **no signals generated**
+
+The system won't send you signals in a weak market. This prevents buying into a falling market.
+
+### What is the Earnings Blackout?
+
+Stocks move unpredictably around earnings. The system will NOT signal any stock within 5 days of its earnings date. This avoids binary gambles.
 
 ---
 
@@ -204,6 +244,7 @@ MAIN MENU:
    6. ☕  Daily Briefing (One-Click Research)
    7. 🔧  Advanced Tools
    8. 🔭  Universe Scan (Find Edge)
+   9. 📈  Performance Check (Did Signals Work?)
    0. ❌  Exit
 
 Select an option:
@@ -223,6 +264,17 @@ Select an option:
 - Full scan of 150+ stocks
 - Takes 2-3 minutes
 - Shows top opportunities with edge scores
+
+**Option 9: Performance Check**
+- See if recent signals actually worked
+- Shows win rate and P&L for signals from 5 and 10 days ago
+- Use this to validate the system is profitable
+
+**Option 7: Advanced Tools**
+- Position Dashboard (track open positions)
+- Add/Close Position (log your trades)
+- Watchlist management
+- Options Greeks analysis
 
 ---
 
@@ -254,6 +306,72 @@ Why: Heavy accumulation + Strong momentum + Outperforming SPY + Breaking out
 | **Support** | Price level where buyers tend to step in |
 | **Resistance** | Price level where sellers tend to appear |
 | **Why** | Plain English explanation of why this stock looks good |
+
+---
+
+## Position Management
+
+Track your trades with the built-in position manager:
+
+```bash
+python launcher.py
+# Select 7 -> Advanced Tools -> 7 (Position Dashboard)
+```
+
+**What you can do:**
+- Log positions with entry/stop/target
+- See live P&L (fetches current prices)
+- Get alerts when near stop or target
+- Check sector concentration (warns if >25% in one sector)
+- Track closed trade performance
+
+**Example Dashboard:**
+```
+POSITION DASHBOARD
+============================================================
+
+⚠️  ALERTS:
+   • CONCENTRATION: Technology is 45% of account (>25%)
+   • NEAR STOP: HOOD only 1.5% above stop
+
+ACCOUNT SUMMARY ($100,000 base):
+   Positions: 3
+   Total Value: $45,000 (45% deployed)
+   Total Risk: $2,100 (2.1% of account)
+   Unrealized P&L: +$1,250
+
+OPEN POSITIONS:
+------------------------------------------------------------
+NVDA (50 shares)
+   Entry: $450 | Current: $475 | P&L: +5.6%
+   Stop: $430 (-9.5%) | Target: $520 (9.5% away)
+```
+
+---
+
+## Customizing Thresholds
+
+All scanner parameters are in one file: `configs/scanner_config.yaml`
+
+**Change without touching code:**
+
+```yaml
+# Extension Filter
+extension:
+  hard_reject_5d: 20     # Reject if 5D move > 20%
+
+# Market Regime  
+regime:
+  min_breadth: 40        # Min % above SMA50 for healthy market
+
+# Earnings
+earnings:
+  blackout_days: 5       # Reject signals within 5 days of earnings
+
+# Signal Grading
+grading:
+  grade_a_min_rr: 2.5    # Min R:R for Grade A
+```
 
 ---
 
@@ -375,8 +493,11 @@ The workflow runs automatically at 8:30 AM ET on weekdays.
 | Term | Definition |
 |------|------------|
 | **ATR** | Average True Range - how much a stock typically moves in a day |
+| **Breadth** | Percentage of stocks above their moving average (market health) |
 | **Breakout** | Stock moving above its recent high |
 | **Entry** | The price at which you buy |
+| **Extension** | How much a stock has already run up (high = chasing) |
+| **Grade A/B/C** | Signal quality rating based on R:R, volume, extension |
 | **MCap** | Market Capitalization - total value of a company |
 | **Momentum** | The tendency of a stock to keep moving in its current direction |
 | **Pullback** | A temporary dip in an uptrend |
@@ -390,6 +511,7 @@ The workflow runs automatically at 8:30 AM ET on weekdays.
 | **Target** | The price at which you plan to take profit |
 | **VIX** | Volatility Index - measures market fear |
 | **Volume** | Number of shares traded |
+| **Volume Surge** | Trading activity significantly above average (institutional buying) |
 
 ---
 
