@@ -2,7 +2,7 @@ name: Daily Market Briefing
 
 on:
   schedule:
-    - cron: '30 13 * * 1-5'  # 8:30 AM ET (EDT)
+    - cron: '30 13 * * 1-5'  # 8:30 AM ET
   workflow_dispatch:
 
 jobs:
@@ -10,72 +10,114 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
       
-      - name: Run Market Analysis & Send Alert
+      - name: Generate Briefing
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python -c "
-          import os
-          import sys
-          import urllib.request
-          import urllib.parse
+          import os, sys, urllib.request, urllib.parse
           from datetime import datetime
-
           sys.path.insert(0, 'src')
 
           token = os.environ['TELEGRAM_BOT_TOKEN']
           chat_id = os.environ['TELEGRAM_CHAT_ID']
 
-          def send_telegram(msg):
+          def send(msg):
               url = f'https://api.telegram.org/bot{token}/sendMessage'
               data = urllib.parse.urlencode({'chat_id': chat_id, 'text': msg}).encode()
-              req = urllib.request.Request(url, data=data)
-              urllib.request.urlopen(req, timeout=10)
+              urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=10)
 
-          # 1. Market Regime
+          # Analysis
           from alpha_lab.market_regime import MarketRegimeAnalyzer
+          from alpha_lab.sector_rotation import SectorRotationAnalyzer
           from utils.data_fetcher import DataFetcher
+          import yfinance as yf
 
           fetcher = DataFetcher(None)
-          regime_analyzer = MarketRegimeAnalyzer(fetcher)
-          regime = regime_analyzer.analyze_regime()
 
-          # 2. Sector Rotation
-          from alpha_lab.sector_rotation import SectorRotationAnalyzer
-          sector_analyzer = SectorRotationAnalyzer(fetcher)
-          sectors = sector_analyzer.analyze_sectors()
+          # 1. Regime
+          regime = MarketRegimeAnalyzer(fetcher).analyze_regime()
 
-          leading = [s['ticker'] for s in sectors.get('rankings', [])[:3] if s.get('status') == 'LEADING']
-          lagging = [s['ticker'] for s in sectors.get('rankings', [])[-3:] if s.get('status') == 'LAGGING']
+          # 2. Sectors
+          sectors = SectorRotationAnalyzer(fetcher).analyze_sectors()
+          rankings = sectors.get('rankings', [])
+          leading = [s for s in rankings if s.get('status') == 'LEADING'][:2]
+          
+          # 3. Top stocks in leading sector
+          sector_etf_to_stocks = {
+              'XLK': ['AAPL', 'MSFT', 'NVDA', 'AMD'],
+              'XLC': ['META', 'GOOGL', 'NFLX', 'DIS'],
+              'XLY': ['AMZN', 'TSLA', 'HD', 'MCD'],
+              'XLF': ['JPM', 'BAC', 'GS', 'MS'],
+              'XLE': ['XOM', 'CVX', 'SLB', 'OXY'],
+              'XLV': ['UNH', 'JNJ', 'PFE', 'ABBV'],
+              'XLI': ['CAT', 'BA', 'UNP', 'HON'],
+              'XLB': ['LIN', 'APD', 'ECL', 'DD'],
+              'XLU': ['NEE', 'DUK', 'SO', 'D'],
+              'XLRE': ['PLD', 'AMT', 'EQIX', 'SPG'],
+              'XLP': ['PG', 'KO', 'PEP', 'COST'],
+          }
+          
+          # Get top pick from leading sector
+          top_pick = None
+          if leading:
+              etf = leading[0]['ticker']
+              stocks = sector_etf_to_stocks.get(etf, [])
+              if stocks:
+                  # Get the one with best momentum
+                  best_mom = -999
+                  for s in stocks[:4]:
+                      try:
+                          hist = yf.Ticker(s).history(period='5d')
+                          if len(hist) >= 2:
+                              mom = (hist['Close'].iloc[-1] / hist['Close'].iloc[0] - 1) * 100
+                              if mom > best_mom:
+                                  best_mom = mom
+                                  top_pick = {'ticker': s, 'momentum': mom, 'price': hist['Close'].iloc[-1]}
+                      except:
+                          pass
 
-          # 3. Build Message
-          msg = f'''Daily Market Briefing
-          {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC
+          # 4. SPY levels
+          spy = yf.Ticker('SPY').history(period='1mo')
+          spy_price = spy['Close'].iloc[-1]
+          spy_high = spy['High'].max()
+          spy_low = spy['Low'].min()
+          spy_sma20 = spy['Close'].rolling(20).mean().iloc[-1]
 
-          MARKET REGIME: {regime['status']}
-          Score: {regime['score']}/100
+          # Build message
+          regime_emoji = {'GREEN': '🟢', 'YELLOW': '🟡', 'RED': '🔴'}.get(regime['status'], '⚪')
+          
+          msg = f'''{regime_emoji} DAILY BRIEFING - {datetime.now().strftime('%b %d')}
+
+          REGIME: {regime['status']} ({regime['score']:.0f}/100)
           Action: {regime['action']}
 
-          SECTORS:
-          Leading: {', '.join(leading) if leading else 'None'}
-          Lagging: {', '.join(lagging) if lagging else 'None'}
+          SPY: \${spy_price:.2f}
+          Range: \${spy_low:.2f} - \${spy_high:.2f}
+          Support: \${spy_sma20:.2f} (20 SMA)
 
-          Run 'python launcher.py' locally for full analysis.
+          HOT SECTOR: {leading[0]['ticker'] if leading else 'None'} ({leading[0]['status'] if leading else ''})
           '''
+          
+          if top_pick:
+              msg += f'''
+          TOP PICK: {top_pick['ticker']}
+          Price: \${top_pick['price']:.2f}
+          5-Day: {top_pick['momentum']:+.1f}%
+          '''
+          
+          msg += '''
+          Run launcher.py for full analysis'''
 
-          send_telegram(msg)
-          print('Daily briefing sent to Telegram!')
+          send(msg)
+          print('Briefing sent!')
           "
