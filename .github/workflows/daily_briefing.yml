@@ -36,87 +36,124 @@ jobs:
               data = urllib.parse.urlencode({'chat_id': chat_id, 'text': msg}).encode()
               urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=10)
 
-          # Analysis
+          import yfinance as yf
           from alpha_lab.market_regime import MarketRegimeAnalyzer
           from alpha_lab.sector_rotation import SectorRotationAnalyzer
           from utils.data_fetcher import DataFetcher
-          import yfinance as yf
 
           fetcher = DataFetcher(None)
 
-          # 1. Regime
-          regime = MarketRegimeAnalyzer(fetcher).analyze_regime()
-
-          # 2. Sectors
-          sectors = SectorRotationAnalyzer(fetcher).analyze_sectors()
-          rankings = sectors.get('rankings', [])
-          leading = [s for s in rankings if s.get('status') == 'LEADING'][:2]
-          
-          # 3. Top stocks in leading sector
-          sector_etf_to_stocks = {
-              'XLK': ['AAPL', 'MSFT', 'NVDA', 'AMD'],
-              'XLC': ['META', 'GOOGL', 'NFLX', 'DIS'],
-              'XLY': ['AMZN', 'TSLA', 'HD', 'MCD'],
-              'XLF': ['JPM', 'BAC', 'GS', 'MS'],
-              'XLE': ['XOM', 'CVX', 'SLB', 'OXY'],
-              'XLV': ['UNH', 'JNJ', 'PFE', 'ABBV'],
-              'XLI': ['CAT', 'BA', 'UNP', 'HON'],
-              'XLB': ['LIN', 'APD', 'ECL', 'DD'],
-              'XLU': ['NEE', 'DUK', 'SO', 'D'],
-              'XLRE': ['PLD', 'AMT', 'EQIX', 'SPG'],
-              'XLP': ['PG', 'KO', 'PEP', 'COST'],
+          # SECTOR NAMES
+          sector_names = {
+              'XLK': 'Technology', 'XLC': 'Communications', 'XLY': 'Consumer Discretionary',
+              'XLF': 'Financials', 'XLE': 'Energy', 'XLV': 'Healthcare',
+              'XLI': 'Industrials', 'XLB': 'Materials', 'XLU': 'Utilities',
+              'XLRE': 'Real Estate', 'XLP': 'Consumer Staples'
           }
-          
-          # Get top pick from leading sector
-          top_pick = None
-          if leading:
-              etf = leading[0]['ticker']
-              stocks = sector_etf_to_stocks.get(etf, [])
-              if stocks:
-                  # Get the one with best momentum
-                  best_mom = -999
-                  for s in stocks[:4]:
-                      try:
-                          hist = yf.Ticker(s).history(period='5d')
-                          if len(hist) >= 2:
-                              mom = (hist['Close'].iloc[-1] / hist['Close'].iloc[0] - 1) * 100
-                              if mom > best_mom:
-                                  best_mom = mom
-                                  top_pick = {'ticker': s, 'momentum': mom, 'price': hist['Close'].iloc[-1]}
-                      except:
-                          pass
 
-          # 4. SPY levels
+          # SCAN UNIVERSE (liquid stocks across sectors)
+          universe = [
+              ('NVDA', 'NVIDIA'), ('AAPL', 'Apple'), ('MSFT', 'Microsoft'), ('GOOGL', 'Alphabet'),
+              ('META', 'Meta'), ('AMZN', 'Amazon'), ('TSLA', 'Tesla'), ('AMD', 'AMD'),
+              ('JPM', 'JPMorgan'), ('GS', 'Goldman Sachs'), ('V', 'Visa'),
+              ('XOM', 'Exxon'), ('CVX', 'Chevron'),
+              ('UNH', 'UnitedHealth'), ('JNJ', 'Johnson & Johnson'),
+              ('CAT', 'Caterpillar'), ('BA', 'Boeing'),
+              ('NFLX', 'Netflix'), ('DIS', 'Disney'),
+              ('COIN', 'Coinbase'), ('SQ', 'Block'), ('PLTR', 'Palantir'),
+          ]
+
+          # 1. REGIME
+          regime = MarketRegimeAnalyzer(fetcher).analyze_regime()
+          regime_emoji = {'GREEN': '🟢', 'YELLOW': '🟡', 'RED': '🔴'}.get(regime['status'], '⚪')
+
+          # 2. SPY KEY LEVELS
           spy = yf.Ticker('SPY').history(period='1mo')
           spy_price = spy['Close'].iloc[-1]
-          spy_high = spy['High'].max()
-          spy_low = spy['Low'].min()
           spy_sma20 = spy['Close'].rolling(20).mean().iloc[-1]
+          spy_change = (spy['Close'].iloc[-1] / spy['Close'].iloc[-2] - 1) * 100
 
-          # Build message
-          regime_emoji = {'GREEN': '🟢', 'YELLOW': '🟡', 'RED': '🔴'}.get(regime['status'], '⚪')
+          # 3. SECTORS
+          sectors = SectorRotationAnalyzer(fetcher).analyze_sectors()
+          rankings = sectors.get('rankings', [])
           
-          msg = f'''{regime_emoji} DAILY BRIEFING - {datetime.now().strftime('%b %d')}
+          leading_sectors = []
+          for s in rankings[:3]:
+              if s.get('score', 0) > 70:
+                  name = sector_names.get(s['ticker'], s['ticker'])
+                  leading_sectors.append(f\"{name} ({s['ticker']})\")
 
-          REGIME: {regime['status']} ({regime['score']:.0f}/100)
-          Action: {regime['action']}
+          # 4. SCAN STOCKS - find momentum + strength
+          opportunities = []
+          for ticker, name in universe:
+              try:
+                  hist = yf.Ticker(ticker).history(period='1mo')
+                  if len(hist) < 20:
+                      continue
+                  
+                  price = hist['Close'].iloc[-1]
+                  sma20 = hist['Close'].rolling(20).mean().iloc[-1]
+                  mom_5d = (hist['Close'].iloc[-1] / hist['Close'].iloc[-5] - 1) * 100
+                  mom_20d = (hist['Close'].iloc[-1] / hist['Close'].iloc[0] - 1) * 100
+                  above_sma = price > sma20
+                  
+                  # Score: momentum + trend
+                  score = 0
+                  if mom_5d > 3: score += 2
+                  elif mom_5d > 0: score += 1
+                  if mom_20d > 10: score += 2
+                  elif mom_20d > 5: score += 1
+                  if above_sma: score += 2
+                  
+                  if score >= 3:  # Only interesting ones
+                      opportunities.append({
+                          'ticker': ticker,
+                          'name': name,
+                          'price': price,
+                          'mom_5d': mom_5d,
+                          'mom_20d': mom_20d,
+                          'above_sma': above_sma,
+                          'score': score
+                      })
+              except Exception as e:
+                  continue
 
-          SPY: \${spy_price:.2f}
-          Range: \${spy_low:.2f} - \${spy_high:.2f}
-          Support: \${spy_sma20:.2f} (20 SMA)
+          # Sort by score
+          opportunities.sort(key=lambda x: x['score'], reverse=True)
+          top_5 = opportunities[:5]
 
-          HOT SECTOR: {leading[0]['ticker'] if leading else 'None'} ({leading[0]['status'] if leading else ''})
+          # BUILD MESSAGE
+          msg = f'''{regime_emoji} MORNING BRIEFING - {datetime.now().strftime('%b %d, %Y')}
+
+          MARKET REGIME: {regime['status']}
+          {regime['action']}
+
+          SPY: \${spy_price:.2f} ({spy_change:+.1f}%)
+          Key Support: \${spy_sma20:.2f}
+
           '''
           
-          if top_pick:
-              msg += f'''
-          TOP PICK: {top_pick['ticker']}
-          Price: \${top_pick['price']:.2f}
-          5-Day: {top_pick['momentum']:+.1f}%
-          '''
-          
+          if leading_sectors:
+              msg += f\"\"\"STRONG SECTORS:
+          {chr(10).join(['• ' + s for s in leading_sectors])}
+
+          \"\"\"
+
+          if top_5:
+              msg += 'TOP OPPORTUNITIES:\\n'
+              for opp in top_5:
+                  trend = '↑' if opp['above_sma'] else '↓'
+                  msg += f\"\"\"
+          {opp['name']} ({opp['ticker']}) {trend}
+          \${opp['price']:.2f} | 5d: {opp['mom_5d']:+.1f}% | 20d: {opp['mom_20d']:+.1f}%
+          \"\"\"
+          else:
+              msg += 'No strong setups today. Cash is a position.'
+
           msg += '''
-          Run launcher.py for full analysis'''
+
+          ─────────────────
+          Full analysis: python launcher.py'''
 
           send(msg)
           print('Briefing sent!')
