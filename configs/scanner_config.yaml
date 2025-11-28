@@ -70,6 +70,21 @@ regime:
   spy_sma_period: 50     # SMA period for trend
   min_breadth: 40        # Min % of stocks above SMA50 for healthy market
 
+# Signal Grading
+grading:
+  # Grade A: Perfect setup (high confidence)
+  grade_a_min_rr: 2.5          # Min R:R ratio
+  grade_a_min_volume: 2.0      # Min volume surge
+  grade_a_max_extension: 5     # Max 5D move %
+  
+  # Grade B: Good setup (normal confidence)
+  grade_b_min_rr: 1.5
+  grade_b_min_volume: 1.5
+  grade_b_max_extension: 10
+  
+  # Grade C: Marginal setup (lower confidence)
+  # Anything that passes filters but below B thresholds
+
 # Alerts
 alerts:
   near_stop_pct: 2       # Alert if within this % of stop

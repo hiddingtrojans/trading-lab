@@ -73,8 +73,9 @@ class TradeScanner:
             except Exception as e:
                 continue
         
-        # Sort by risk/reward
-        results.sort(key=lambda x: x.get('rr_ratio', 0), reverse=True)
+        # Sort by grade (A>B>C) then risk/reward
+        grade_order = {'A': 0, 'B': 1, 'C': 2}
+        results.sort(key=lambda x: (grade_order.get(x.get('grade', 'C'), 2), -x.get('rr_ratio', 0)))
         return results[:top_n]
     
     def _analyze(self, ticker: str) -> Optional[Dict]:
@@ -175,11 +176,15 @@ class TradeScanner:
         if should_reject:
             return None  # Hard reject - too close to earnings
         
+        # === Signal Grading (A/B/C) ===
+        grade = self._grade_signal(rr_ratio, vol_ratio, mom_5d)
+        
         return {
             'ticker': ticker,
             'name': info.get('shortName', ticker),
             'price': round(price, 2),
             'action': action,
+            'grade': grade,
             'entry': entry,
             'stop': stop,
             'target': target,
@@ -191,6 +196,41 @@ class TradeScanner:
             'vol_ratio': round(vol_ratio, 1),
             'earnings_warning': earnings_warning,
         }
+    
+    def _grade_signal(self, rr_ratio: float, vol_ratio: float, mom_5d: float) -> str:
+        """
+        Grade signal quality: A (best), B (good), C (marginal).
+        
+        Grade A: High R:R, strong volume, not extended
+        Grade B: Decent R:R, good volume
+        Grade C: Passes filters but marginal quality
+        """
+        # Load grading thresholds from config
+        grade_a = {
+            'min_rr': get_config('grading.grade_a_min_rr', 2.5),
+            'min_vol': get_config('grading.grade_a_min_volume', 2.0),
+            'max_ext': get_config('grading.grade_a_max_extension', 5),
+        }
+        grade_b = {
+            'min_rr': get_config('grading.grade_b_min_rr', 1.5),
+            'min_vol': get_config('grading.grade_b_min_volume', 1.5),
+            'max_ext': get_config('grading.grade_b_max_extension', 10),
+        }
+        
+        # Grade A: All criteria met at high level
+        if (rr_ratio >= grade_a['min_rr'] and 
+            vol_ratio >= grade_a['min_vol'] and 
+            mom_5d <= grade_a['max_ext']):
+            return 'A'
+        
+        # Grade B: All criteria met at good level
+        if (rr_ratio >= grade_b['min_rr'] and 
+            vol_ratio >= grade_b['min_vol'] and 
+            mom_5d <= grade_b['max_ext']):
+            return 'B'
+        
+        # Grade C: Everything else that passed filters
+        return 'C'
     
     def _calc_atr(self, hist: pd.DataFrame, period: int = 14) -> float:
         """Calculate Average True Range."""
@@ -244,10 +284,12 @@ def format_trade_signals(signals: List[Dict]) -> str:
     lines.append("=" * 35)
     
     for s in signals:
-        warning = f"\n   {s['earnings_warning']}" if s['earnings_warning'] else ""
+        warning = f"\n   {s['earnings_warning']}" if s.get('earnings_warning') else ""
+        grade = s.get('grade', 'C')
+        grade_emoji = {'A': '[A]', 'B': '[B]', 'C': '[C]'}.get(grade, '')
         
         lines.append(f"""
-{s['action']}: {s['name']} ({s['ticker']})
+{grade_emoji} {s['action']}: {s['name']} ({s['ticker']})
 Price: ${s['price']} | 5D: {s['mom_5d']:+.1f}%
 
 Entry: ${s['entry']}
