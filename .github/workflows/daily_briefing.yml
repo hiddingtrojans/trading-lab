@@ -1,4 +1,4 @@
-name: Daily Market Briefing
+name: Trade Signals
 
 on:
   schedule:
@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  briefing:
+  scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     
     steps:
       - uses: actions/checkout@v4
@@ -17,9 +17,9 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       
-      - run: pip install -r requirements.txt
+      - run: pip install yfinance pandas numpy
       
-      - name: Scan Universe and Send Alert
+      - name: Scan and Send Signals
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -38,66 +38,52 @@ jobs:
               urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=30)
 
           import yfinance as yf
+          from alpha_lab.trade_scanner import TradeScanner, format_trade_signals
           from alpha_lab.market_regime import MarketRegimeAnalyzer
-          from alpha_lab.universe_scanner import UniverseScanner
           from utils.data_fetcher import DataFetcher
 
-          print('Starting scan...')
-
-          # 1. MARKET REGIME
+          # 1. REGIME CHECK
           fetcher = DataFetcher(None)
           regime = MarketRegimeAnalyzer(fetcher).analyze_regime()
-          regime_emoji = {'GREEN': '🟢', 'YELLOW': '🟡', 'RED': '🔴'}.get(regime['status'], '⚪')
-
+          
+          emoji = {'GREEN': '🟢', 'YELLOW': '🟡', 'RED': '🔴'}.get(regime['status'], '⚪')
+          
           # 2. SPY CONTEXT
-          spy = yf.Ticker('SPY').history(period='1mo')
+          spy = yf.Ticker('SPY').history(period='5d')
           spy_price = spy['Close'].iloc[-1]
-          spy_sma20 = spy['Close'].rolling(20).mean().iloc[-1]
           spy_change = (spy['Close'].iloc[-1] / spy['Close'].iloc[-2] - 1) * 100
 
-          # 3. SCAN UNIVERSE (this is the real work)
-          print('Scanning 150+ small/mid caps...')
-          scanner = UniverseScanner(include_mid_caps=True)
-          results = scanner.scan(top_n=5)
+          # 3. TRADE SIGNALS
+          scanner = TradeScanner(risk_per_trade=500)
+          signals = scanner.scan(top_n=5)
 
           # 4. BUILD MESSAGE
-          msg = f'''{regime_emoji} MORNING SCAN - {datetime.now().strftime('%b %d')}
-
-          REGIME: {regime['status']} ({regime['score']}/100)
+          msg = f'''{emoji} {regime['status']} | SPY \${spy_price:.2f} ({spy_change:+.1f}%)
           {regime['action']}
-
-          SPY: \${spy_price:.2f} ({spy_change:+.1f}%)
-          Support: \${spy_sma20:.2f}
-
           '''
-
-          if results:
-              msg += 'TOP OPPORTUNITIES:\\n'
-              msg += '(sorted by Edge Score)\\n'
-              msg += '-' * 30 + '\\n'
-              
-              for r in results:
-                  # Format market cap
-                  if r['market_cap_b'] >= 1:
-                      mcap = f\"\${r['market_cap_b']:.1f}B\"
-                  else:
-                      mcap = f\"\${r['market_cap_b']*1000:.0f}M\"
-                  
+          
+          if regime['status'] == 'RED':
+              msg += '''
+          No new longs. Reduce exposure.
+          '''
+          elif signals:
+              msg += '''
+          TRADE SETUPS:
+          '''
+              for s in signals:
+                  warning = f\"  {s['earnings_warning']}\" if s['earnings_warning'] else ''
                   msg += f'''
-          {r['name']} ({r['ticker']})
-          \${r['price']:.2f} | {mcap} | Score: {r['edge_score']}
-          5D: {r['mom_5d']:+.1f}% | Vol: {r['volume_change']:+.0f}%
-          Setup: {r['setup_type']}
-          Why: {r['why']}
-          Entry: \${r['support']:.2f} | Target: \${r['resistance']:.2f}
+          {s['action']}: {s['name']} ({s['ticker']})
+          Now: \${s['price']} | 5D: {s['mom_5d']:+.1f}%
+          Entry: \${s['entry']} | Stop: \${s['stop']} | Target: \${s['target']}
+          R:R 1:{s['rr_ratio']} | {s['shares']} shares (\${s['risk_amount']:.0f} risk)
+          {s['reason']}{warning}
           '''
           else:
-              msg += 'No setups meeting criteria today.\\nCash is a position.'
-
-          msg += '''
-          ─────────────────
-          Full scan: python launcher.py → Option 8'''
+              msg += '''
+          No clean setups. Wait for better entries.
+          '''
 
           send(msg)
-          print('Alert sent!')
+          print('Signals sent!')
           "
