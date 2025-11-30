@@ -30,44 +30,58 @@ def get_next_earnings(ticker: str) -> Optional[Dict]:
     }
     """
     import yfinance as yf
+    from datetime import date
     
     try:
         stock = yf.Ticker(ticker)
         
-        # Try to get earnings dates
+        # Try calendar first (most reliable)
         calendar = stock.calendar
         
-        if calendar is None or calendar.empty:
-            # Try earnings_dates as fallback
-            earnings = stock.earnings_dates
-            if earnings is not None and not earnings.empty:
-                # Get next future date
-                future_dates = earnings[earnings.index > datetime.now()]
-                if not future_dates.empty:
-                    next_date = future_dates.index[0]
-                    days_until = (next_date - datetime.now()).days
+        if calendar is not None:
+            # Calendar can be dict or DataFrame
+            if isinstance(calendar, dict):
+                earnings_dates = calendar.get('Earnings Date', [])
+                if earnings_dates:
+                    # It's a list of dates
+                    if isinstance(earnings_dates, list):
+                        earnings_date = earnings_dates[0]
+                    else:
+                        earnings_date = earnings_dates
+                    
+                    # Convert to datetime if needed
+                    if isinstance(earnings_date, date):
+                        earnings_date = datetime.combine(earnings_date, datetime.min.time())
+                    
+                    days_until = (earnings_date - datetime.now()).days
+                    
                     return {
                         'ticker': ticker,
-                        'earnings_date': next_date,
+                        'earnings_date': earnings_date,
                         'days_until': days_until,
-                        'is_confirmed': False,  # From earnings_dates, less reliable
+                        'is_confirmed': True,
                     }
-            return None
         
-        # Get earnings date from calendar
-        if 'Earnings Date' in calendar.index:
-            earnings_date = calendar.loc['Earnings Date'].iloc[0]
-            if isinstance(earnings_date, str):
-                earnings_date = datetime.strptime(earnings_date, '%Y-%m-%d')
-            
-            days_until = (earnings_date - datetime.now()).days
-            
-            return {
-                'ticker': ticker,
-                'earnings_date': earnings_date,
-                'days_until': days_until,
-                'is_confirmed': True,
-            }
+        # Fallback to earnings_dates
+        earnings = stock.earnings_dates
+        if earnings is not None and not earnings.empty:
+            # Get next future date
+            now = datetime.now()
+            for idx in earnings.index:
+                # Handle timezone-aware datetimes
+                if hasattr(idx, 'tzinfo') and idx.tzinfo:
+                    idx_naive = idx.replace(tzinfo=None)
+                else:
+                    idx_naive = idx
+                
+                if idx_naive > now:
+                    days_until = (idx_naive - now).days
+                    return {
+                        'ticker': ticker,
+                        'earnings_date': idx_naive,
+                        'days_until': days_until,
+                        'is_confirmed': False,
+                    }
             
     except Exception as e:
         pass
