@@ -42,117 +42,62 @@ class MorningScan:
             
     def scan_unusual_volume(self, top_n: int = 3) -> List[Dict]:
         """
-        Scan entire market for unusual volume via IBKR.
+        Scan ENTIRE US market for unusual volume via IBKR.
         
-        Returns top N stocks with:
-        - Volume > 2x average
-        - Price > $10
-        - Market cap > $500M
+        NO hardcoded lists - scans thousands of stocks.
         """
         results = []
         
         if not self.ib or not self.ib.isConnected():
-            print("  IBKR not connected, using fallback scan...")
-            return self._fallback_volume_scan(top_n)
+            print("  IBKR not connected - cannot scan full market")
+            print("  (Run with IBKR to scan entire US market)")
+            return []
             
         try:
             from ib_insync import ScannerSubscription
             
-            # Create scanner for unusual volume
+            print("  Scanning ENTIRE US market via IBKR...")
+            
+            # Scan for unusual volume across ALL US stocks
             scanner = ScannerSubscription(
                 instrument='STK',
-                locationCode='STK.US.MAJOR',
-                scanCode='HIGH_VS_13W_HL',  # High relative to 13-week high/low
-                numberOfRows=50,
-                abovePrice=10,
-                marketCapAbove=500000000,  # $500M+
+                locationCode='STK.US.MAJOR',  # ALL major US exchanges
+                scanCode='HOT_BY_VOLUME',     # Highest volume rate
+                numberOfRows=top_n * 3,       # Get extra to filter mega-caps
+                abovePrice=5,                 # Min $5
+                marketCapAbove=200000000,     # Min $200M (skip penny stocks)
             )
             
-            # Run scan
             scan_data = self.ib.reqScannerData(scanner)
             
-            for item in scan_data[:top_n * 3]:  # Get extra to filter
+            # Filter out boring mega-caps everyone watches
+            mega_caps = {'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.A', 'BRK.B', 'SPY', 'QQQ'}
+            
+            for item in scan_data:
                 contract = item.contractDetails.contract
                 ticker = contract.symbol
                 
-                # Get additional data
-                vol_ratio = self._get_volume_ratio(ticker)
-                setup = self._check_setup(ticker)
+                if ticker in mega_caps:
+                    continue
+                    
+                name = item.contractDetails.longName[:25] if item.contractDetails.longName else ticker
                 
-                if vol_ratio and vol_ratio > 2.0:
-                    results.append({
-                        'ticker': ticker,
-                        'vol_ratio': vol_ratio,
-                        'setup': setup,
-                        'price': self._get_price(ticker),
-                    })
+                results.append({
+                    'ticker': ticker,
+                    'name': name,
+                    'vol_ratio': 'high',  # IBKR already filtered for high volume
+                    'setup': 'volume surge',
+                })
                     
                 if len(results) >= top_n:
                     break
                     
-            self.ib.cancelScannerSubscription(scanner)
-            
         except Exception as e:
             print(f"  IBKR scan error: {e}")
-            return self._fallback_volume_scan(top_n)
+            return []
             
         return results[:top_n]
         
-    def _fallback_volume_scan(self, top_n: int = 3) -> List[Dict]:
-        """Fallback using yfinance if IBKR unavailable."""
-        import yfinance as yf
-        
-        # Broader universe for scanning
-        universe = [
-            # Mid-caps with potential
-            'HUBS', 'AXON', 'CELH', 'DUOL', 'TOST', 'RKLB', 'IONQ', 'AFRM',
-            'SOFI', 'HOOD', 'RIVN', 'LCID', 'DNA', 'PATH', 'CFLT', 'MDB',
-            'SNOW', 'NET', 'DDOG', 'ZS', 'CRWD', 'PANW', 'FTNT', 'OKTA',
-            'BILL', 'PCTY', 'PAYC', 'GDDY', 'TWLO', 'TTD', 'ROKU', 'SPOT',
-            'PINS', 'SNAP', 'MTCH', 'BMBL', 'DASH', 'ABNB', 'EXPE', 'BKNG',
-            'WDAY', 'NOW', 'TEAM', 'ADSK', 'ANSS', 'CDNS', 'SNPS', 'KLAC',
-            'LRCX', 'AMAT', 'ASML', 'TER', 'ENTG', 'MKSI', 'ONTO', 'FORM',
-            # Small caps
-            'SMCI', 'VRT', 'AEHR', 'ACLS', 'CAMT', 'ALGM', 'POWI', 'WOLF',
-            'ASTS', 'RDW', 'LUNR', 'BWXT', 'KTOS', 'PLTR', 'BBAI', 'SOUN',
-        ]
-        
-        results = []
-        
-        for ticker in universe:
-            try:
-                stock = yf.Ticker(ticker)
-                hist = stock.history(period='3mo')
-                
-                if len(hist) < 20:
-                    continue
-                    
-                # Calculate volume ratio
-                current_vol = hist['Volume'].iloc[-1]
-                avg_vol = hist['Volume'].iloc[-20:].mean()
-                vol_ratio = current_vol / avg_vol if avg_vol > 0 else 0
-                
-                # Check if near 52-week high
-                current_price = hist['Close'].iloc[-1]
-                high_52w = hist['High'].max()
-                pct_from_high = (high_52w - current_price) / high_52w * 100
-                
-                # Filter: unusual volume + near highs
-                if vol_ratio > 2.0 and pct_from_high < 10:
-                    results.append({
-                        'ticker': ticker,
-                        'vol_ratio': round(vol_ratio, 1),
-                        'setup': 'near 52w high' if pct_from_high < 5 else 'consolidating',
-                        'price': round(current_price, 2),
-                        'pct_from_high': round(pct_from_high, 1),
-                    })
-                    
-            except Exception:
-                continue
-                
-        # Sort by volume ratio
-        results.sort(key=lambda x: x['vol_ratio'], reverse=True)
-        return results[:top_n]
         
     def _get_volume_ratio(self, ticker: str) -> Optional[float]:
         """Get volume ratio for a ticker."""
@@ -282,13 +227,16 @@ class MorningScan:
         
         # Unusual activity
         lines.append("")
-        lines.append("━━━ UNUSUAL ACTIVITY ━━━")
         
         if unusual:
+            lines.append("━━━ UNUSUAL VOLUME (Full US Market) ━━━")
             for i, stock in enumerate(unusual, 1):
-                lines.append(f"{i}. {stock['ticker']} - Vol {stock['vol_ratio']}x, {stock['setup']}")
+                name = stock.get('name', '')
+                lines.append(f"{i}. {stock['ticker']} - {name}")
         else:
-            lines.append("No unusual activity detected")
+            # No IBKR = show this is a limitation
+            lines.append("━━━ MARKET SCAN ━━━")
+            lines.append("📡 IBKR offline - limited to SEC data")
             
         # Insider trades
         lines.append("")
