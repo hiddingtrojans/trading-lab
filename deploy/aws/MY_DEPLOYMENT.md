@@ -3,31 +3,31 @@
 ## Instance Details
 
 - **Instance ID**: i-080534024ab368273
-- **Public IP**: 44.222.217.236 (changes on restart)
+- **Public IP**: 3.95.27.222 (changes on restart)
 - **Region**: us-east-1
 - **Instance Type**: t3.micro (free tier eligible)
 
 ## SSH Access
 
 ```bash
-ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204
+ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222
 ```
 
 ---
 
-## 🔐 IB Gateway (Docker) - WORKING ✅
+## 🔐 IB Gateway (Docker) - TESTING MONDAY ⏳
 
 IB Gateway runs via Docker with auto-restart.
 
 **Check status:**
 ```bash
-ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204 "sudo docker ps"
-ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204 "sudo docker logs ibgateway --tail 20"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "sudo docker ps"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "sudo docker logs ibgateway --tail 20"
 ```
 
 **Restart if needed:**
 ```bash
-ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204 "sudo docker restart ibgateway"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "sudo docker restart ibgateway"
 ```
 
 **API Ports:**
@@ -43,18 +43,27 @@ ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204 "sudo docker restart ibgateway
 
 | Time (ET) | Task | Description |
 |-----------|------|-------------|
-| 8:30 AM | Daily Briefing | Market overview + top picks |
-| 9:00 AM | Trade Scanner | Fresh signals with grading |
+| 8:30 AM | Morning Scan | Market regime + unusual activity |
+| 10 AM, 12 PM, 2 PM | **Options Flow** | Detect smart money (NEW!) |
 | 10 AM, 12 PM, 2 PM, 4 PM | Regime Check | Market condition alerts |
 | 6:00 PM | Smart Money Scan | Insider trades |
 | 6:05 PM | 13F Check | Hedge fund activity |
+
+### Options Flow Scanner (NEW!)
+
+Detects:
+- Large premium trades (>$50K)
+- High volume/OI ratio (new positions)
+- Far OTM sweeps (speculative bets)
+
+This is what Unusual Whales charges $40/mo for.
 
 ### Logs
 
 ```bash
 # View logs
-ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204 "tail -50 ~/scanner/logs/briefing.log"
-ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204 "tail -50 ~/scanner/logs/trades.log"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "tail -50 ~/scanner/logs/morning.log"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "tail -50 ~/scanner/logs/options_flow.log"
 ```
 
 ## Management Commands
@@ -77,29 +86,19 @@ aws ec2 describe-instances --instance-ids i-080534024ab368273 --profile personal
 aws ec2 describe-instances --instance-ids i-080534024ab368273 --profile personal --region us-east-1 --query 'Reservations[0].Instances[0].PublicIpAddress' --output text
 ```
 
-### Update Code
-
-```bash
-# From your Mac, in the scanner directory:
-cd ~/Desktop/scanner
-tar --exclude='leaps_env' --exclude='*.pyc' --exclude='__pycache__' --exclude='.git' -czf /tmp/scanner.tar.gz .
-scp -i ~/.ssh/scanner-key.pem /tmp/scanner.tar.gz ubuntu@98.92.17.204:~
-ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204 "cd ~/scanner && tar -xzf ~/scanner.tar.gz"
-```
-
 ### Run Manual Scan
 
 ```bash
 # SSH in and run
-ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204
+ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222
 cd ~/scanner && source venv/bin/activate
-export $(grep -v '^#' configs/telegram.env | xargs)
+source configs/telegram.env
 
-# Run daily briefing
-python src/alpha_lab/daily_briefing.py
+# Run morning scan
+python src/alpha_lab/morning_scan.py
 
-# Run trade scanner
-python src/alpha_lab/trade_scanner.py
+# Run options flow scanner
+python src/alpha_lab/options_flow_scanner.py
 
 # Check Berkshire holdings
 python src/alpha_lab/hedge_fund_tracker.py --fund "Berkshire Hathaway" --holdings
@@ -116,7 +115,6 @@ python src/alpha_lab/hedge_fund_tracker.py --fund "Berkshire Hathaway" --holding
 
 **Tips to reduce cost:**
 - Stop instance on weekends: `aws ec2 stop-instances ...`
-- Use spot instances (not recommended for always-on)
 
 ## Terminate (Delete Everything)
 
@@ -131,4 +129,3 @@ aws ec2 delete-security-group --group-name scanner-sg --profile personal --regio
 aws ec2 delete-key-pair --key-name scanner-key --profile personal --region us-east-1
 rm ~/.ssh/scanner-key.pem
 ```
-
