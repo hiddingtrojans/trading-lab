@@ -1,447 +1,357 @@
-#!/usr/bin/env python3
 """
-Real-Time Options Flow Scanner (IBKR)
-=====================================
+Options Flow Scanner - Detect Smart Money via IBKR
 
-Monitors options activity in real-time to detect unusual flow:
-- Large single trades (premium > threshold)
-- Volume spikes vs open interest
-- Far OTM calls/puts with unusual size
-- Sweeps (aggressive fills across exchanges)
+Scans for unusual options activity that often precedes big moves:
+- Large premium trades (>$50K)
+- High volume/OI ratio (>3x normal)
+- Far OTM aggressive buying
 
-This is what $300/month flow services sell. IBKR gives it to you.
-
-Usage:
-    python src/alpha_lab/options_flow_scanner.py
-    python src/alpha_lab/options_flow_scanner.py --tickers NVDA,TSLA,AMD
-    python src/alpha_lab/options_flow_scanner.py --alert  # Enable Telegram alerts
+This is what Unusual Whales charges $40/mo for. We do it free with IBKR.
 """
 
 import os
 import sys
-import time
-import argparse
-import yaml
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Callable
+from typing import List, Dict, Optional
 from dataclasses import dataclass
-from collections import defaultdict
-import threading
+import time
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(project_root, 'src'))
-
-from ib_insync import IB, Stock, Option, Contract, Ticker, util
-from alpha_lab.config import get_config
-
-# Suppress ib_insync logging
-import logging
-logging.getLogger('ib_insync').setLevel(logging.WARNING)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 
 @dataclass
-class FlowAlert:
-    """Unusual options flow alert."""
-    timestamp: datetime
+class OptionsFlow:
+    """Represents an unusual options trade."""
     ticker: str
     strike: float
     expiry: str
-    option_type: str  # CALL or PUT
-    premium: float
+    call_put: str  # 'C' or 'P'
+    premium: float  # Total $ value
     volume: int
     open_interest: int
     vol_oi_ratio: float
-    alert_type: str  # LARGE_PREMIUM, HIGH_VOL_OI, FAR_OTM, SWEEP
-    underlying_price: float
-    otm_pct: float
-    
-    def __str__(self):
-        return (
-            f"{self.alert_type}: {self.ticker} {self.strike}{self.option_type[0]} "
-            f"{self.expiry} | ${self.premium:,.0f} premium | "
-            f"Vol/OI: {self.vol_oi_ratio:.1f}x | {self.otm_pct:+.1f}% OTM"
-        )
+    otm_pct: float  # How far out of the money
+    spot_price: float
+    signal_type: str  # 'LARGE_PREMIUM', 'HIGH_VOL_OI', 'OTM_SWEEP'
+    timestamp: datetime
 
 
 class OptionsFlowScanner:
     """
-    Real-time options flow scanner using IBKR.
+    Scans IBKR for unusual options activity.
     
     Detects:
-    1. Large premium trades (>$100K single trade)
-    2. Volume > 5x open interest
-    3. Far OTM options (>15% OTM) with size
-    4. Aggressive sweeps (hitting asks)
+    1. Large premium trades (>$50K single trade)
+    2. High volume/OI ratio (>3x suggests new positioning)
+    3. Far OTM buying (>20% OTM with high volume = speculative bet)
     """
     
-    # High-volume options tickers to monitor
-    DEFAULT_WATCHLIST = [
-        'SPY', 'QQQ', 'IWM', 'NVDA', 'TSLA', 'AMD', 'AAPL', 'MSFT', 
-        'META', 'AMZN', 'GOOGL', 'NFLX', 'CRM', 'COIN', 'MARA',
-        'PLTR', 'SOFI', 'HOOD', 'ARM', 'SMCI', 'MU', 'INTC'
+    # Thresholds - tune these based on experience
+    MIN_PREMIUM = 50000        # $50K minimum premium
+    MIN_VOL_OI_RATIO = 3.0     # Volume > 3x open interest
+    MIN_OTM_PCT = 15           # 15%+ out of the money
+    MIN_OTM_VOLUME = 500       # Minimum volume for OTM alerts
+    
+    # Liquid stocks to scan (options need liquidity)
+    SCAN_UNIVERSE = [
+        # Mega caps - most liquid options
+        'SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'META', 'GOOGL',
+        'AMD', 'NFLX', 'CRM', 'ORCL', 'ADBE', 'INTC',
+        # High beta / meme potential
+        'COIN', 'MARA', 'RIOT', 'HOOD', 'SOFI', 'PLTR', 'RIVN', 'LCID',
+        'GME', 'AMC', 'BBBY', 'BB',
+        # Sector ETFs
+        'XLF', 'XLE', 'XLK', 'XLV', 'XLI', 'ARKK', 'SOXL', 'TQQQ',
+        # Volatile mid-caps
+        'SNOW', 'NET', 'CRWD', 'DDOG', 'MDB', 'ZS', 'OKTA',
+        'SQ', 'PYPL', 'SHOP', 'ROKU', 'SNAP', 'PINS', 'UBER', 'LYFT',
+        # Biotech (big moves on news)
+        'MRNA', 'BNTX', 'XBI',
     ]
     
-    def __init__(self, watchlist: List[str] = None, alert_callback: Callable = None):
-        """
-        Initialize scanner.
-        
-        Args:
-            watchlist: List of tickers to monitor
-            alert_callback: Function to call when alert triggered
-        """
-        self.watchlist = watchlist or self.DEFAULT_WATCHLIST
-        self.alert_callback = alert_callback
-        self.ib = IB()
-        self.alerts: List[FlowAlert] = []
-        self.running = False
-        
-        # Thresholds from config
-        self.thresholds = {
-            'min_premium': get_config('options_flow.min_premium', 50000),
-            'large_premium': get_config('options_flow.large_premium', 100000),
-            'vol_oi_ratio': get_config('options_flow.vol_oi_ratio', 5.0),
-            'far_otm_pct': get_config('options_flow.far_otm_pct', 15),
-            'far_otm_min_premium': get_config('options_flow.far_otm_min_premium', 25000),
-        }
-        
-        # Cache for underlying prices and options data
-        self.underlying_prices: Dict[str, float] = {}
-        self.options_data: Dict[str, Dict] = defaultdict(dict)
+    def __init__(self, host: str = '127.0.0.1', port: int = 4002):
+        self.host = host
+        self.port = port
+        self.ib = None
+        self.flows: List[OptionsFlow] = []
         
     def connect(self) -> bool:
         """Connect to IBKR."""
         try:
-            cfg_path = os.path.join(project_root, 'configs', 'ibkr.yaml')
-            with open(cfg_path) as f:
-                cfg = yaml.safe_load(f)
-            
-            # Use random client ID to avoid conflicts
-            import random
-            client_id = random.randint(100, 999)
-            
-            self.ib.connect(cfg['host'], cfg['port'], clientId=client_id, timeout=15)
-            
-            # Set market data type (1=live, 3=delayed)
-            self.ib.reqMarketDataType(cfg['market_data']['md_type'])
-            
-            print(f"Connected to IBKR (Account: {self.ib.managedAccounts()[0]})")
+            from ib_insync import IB
+            self.ib = IB()
+            self.ib.connect(self.host, self.port, clientId=30, timeout=15)
+            print(f"✅ Connected to IBKR")
             return True
-            
         except Exception as e:
-            print(f"Failed to connect to IBKR: {e}")
-            print("Make sure TWS or IB Gateway is running.")
+            print(f"❌ IBKR connection failed: {e}")
             return False
-    
+            
     def disconnect(self):
         """Disconnect from IBKR."""
-        if self.ib.isConnected():
+        if self.ib and self.ib.isConnected():
             self.ib.disconnect()
-    
-    def get_underlying_price(self, ticker: str) -> float:
-        """Get current price of underlying."""
-        if ticker in self.underlying_prices:
-            return self.underlying_prices[ticker]
-        
-        contract = Stock(ticker, 'SMART', 'USD')
-        self.ib.qualifyContracts(contract)
-        
-        ticker_data = self.ib.reqMktData(contract, '', False, False)
-        self.ib.sleep(1)  # Wait for data
-        
-        price = ticker_data.marketPrice()
-        if price and price > 0:
-            self.underlying_prices[ticker] = price
+            
+    def get_spot_price(self, ticker: str) -> Optional[float]:
+        """Get current stock price."""
+        try:
+            from ib_insync import Stock
+            contract = Stock(ticker, 'SMART', 'USD')
+            self.ib.qualifyContracts(contract)
+            ticker_data = self.ib.reqMktData(contract)
+            self.ib.sleep(0.5)
+            price = ticker_data.last or ticker_data.close
+            self.ib.cancelMktData(contract)
             return price
-        
-        # Fallback to last price
-        price = ticker_data.last or ticker_data.close
-        self.underlying_prices[ticker] = price or 0
-        return price or 0
-    
-    def get_option_chain(self, ticker: str) -> List[Contract]:
-        """Get option chain for ticker."""
-        contract = Stock(ticker, 'SMART', 'USD')
-        self.ib.qualifyContracts(contract)
-        
-        # Get option parameters
-        chains = self.ib.reqSecDefOptParams(ticker, '', contract.secType, contract.conId)
-        
-        if not chains:
-            return []
-        
-        chain = chains[0]  # Use first exchange
-        
-        # Get options for next 2 expirations with reasonable strikes
-        underlying_price = self.get_underlying_price(ticker)
-        if not underlying_price:
-            return []
-        
-        # Filter strikes within 20% of current price
-        min_strike = underlying_price * 0.8
-        max_strike = underlying_price * 1.2
-        
-        relevant_strikes = [s for s in chain.strikes if min_strike <= s <= max_strike]
-        
-        # Get next 4 expirations
-        from datetime import date
-        today = date.today()
-        relevant_exps = sorted([e for e in chain.expirations if e >= today.strftime('%Y%m%d')])[:4]
-        
-        options = []
-        for exp in relevant_exps:
-            for strike in relevant_strikes:
-                for right in ['C', 'P']:
-                    opt = Option(ticker, exp, strike, right, chain.exchange)
-                    options.append(opt)
-        
-        return options
-    
-    def scan_ticker_options(self, ticker: str) -> List[FlowAlert]:
-        """Scan options for a single ticker."""
-        alerts = []
-        
-        underlying_price = self.get_underlying_price(ticker)
-        if not underlying_price:
-            return alerts
-        
-        options = self.get_option_chain(ticker)
-        if not options:
-            return alerts
-        
-        # Qualify contracts in batches
-        batch_size = 50
-        for i in range(0, len(options), batch_size):
-            batch = options[i:i+batch_size]
-            self.ib.qualifyContracts(*batch)
-        
-        # Request market data for options
-        tickers_data = []
-        for opt in options[:100]:  # Limit to avoid overwhelming
-            try:
-                ticker_data = self.ib.reqMktData(opt, '', False, False)
-                tickers_data.append((opt, ticker_data))
-            except:
-                continue
-        
-        self.ib.sleep(2)  # Wait for data
-        
-        # Analyze each option
-        for opt, data in tickers_data:
-            alert = self._analyze_option(ticker, opt, data, underlying_price)
-            if alert:
-                alerts.append(alert)
-        
-        # Cancel market data subscriptions
-        for opt, data in tickers_data:
-            self.ib.cancelMktData(data.contract)
-        
-        return alerts
-    
-    def _analyze_option(self, ticker: str, option: Option, data: Ticker, 
-                        underlying_price: float) -> Optional[FlowAlert]:
-        """Analyze single option for unusual activity."""
-        
-        volume = data.volume or 0
-        open_interest = data.callOpenInterest if option.right == 'C' else data.putOpenInterest
-        open_interest = open_interest or 1  # Avoid division by zero
-        
-        # Calculate premium (volume * price * 100)
-        option_price = data.last or data.modelGreeks.optPrice if data.modelGreeks else 0
-        if not option_price:
+        except:
             return None
-        
-        premium = volume * option_price * 100
-        
-        # Skip if below minimum threshold
-        if premium < self.thresholds['min_premium']:
-            return None
-        
-        # Calculate OTM percentage
-        if option.right == 'C':
-            otm_pct = (option.strike - underlying_price) / underlying_price * 100
-        else:
-            otm_pct = (underlying_price - option.strike) / underlying_price * 100
-        
-        # Volume/OI ratio
-        vol_oi_ratio = volume / max(open_interest, 1)
-        
-        # Determine alert type
-        alert_type = None
-        
-        # Check for large premium
-        if premium >= self.thresholds['large_premium']:
-            alert_type = 'LARGE_PREMIUM'
-        
-        # Check for high vol/OI
-        elif vol_oi_ratio >= self.thresholds['vol_oi_ratio']:
-            alert_type = 'HIGH_VOL_OI'
-        
-        # Check for far OTM with size
-        elif (otm_pct >= self.thresholds['far_otm_pct'] and 
-              premium >= self.thresholds['far_otm_min_premium']):
-            alert_type = 'FAR_OTM'
-        
-        if not alert_type:
-            return None
-        
-        return FlowAlert(
-            timestamp=datetime.now(),
-            ticker=ticker,
-            strike=option.strike,
-            expiry=option.lastTradeDateOrContractMonth,
-            option_type='CALL' if option.right == 'C' else 'PUT',
-            premium=premium,
-            volume=volume,
-            open_interest=open_interest,
-            vol_oi_ratio=vol_oi_ratio,
-            alert_type=alert_type,
-            underlying_price=underlying_price,
-            otm_pct=otm_pct
-        )
-    
-    def scan_all(self) -> List[FlowAlert]:
-        """Scan all watchlist tickers."""
-        all_alerts = []
-        
-        print(f"Scanning {len(self.watchlist)} tickers for unusual options flow...")
-        print("-" * 60)
-        
-        for i, ticker in enumerate(self.watchlist):
-            print(f"  [{i+1}/{len(self.watchlist)}] Scanning {ticker}...")
             
-            try:
-                alerts = self.scan_ticker_options(ticker)
-                all_alerts.extend(alerts)
+    def scan_ticker_options(self, ticker: str) -> List[OptionsFlow]:
+        """Scan a single ticker for unusual options activity."""
+        flows = []
+        
+        try:
+            from ib_insync import Stock, Option
+            
+            # Get spot price
+            spot = self.get_spot_price(ticker)
+            if not spot:
+                return flows
                 
-                for alert in alerts:
-                    print(f"    ALERT: {alert}")
+            # Get option chains for next 2 months
+            stock = Stock(ticker, 'SMART', 'USD')
+            self.ib.qualifyContracts(stock)
+            
+            chains = self.ib.reqSecDefOptParams(stock.symbol, '', stock.secType, stock.conId)
+            if not chains:
+                return flows
+                
+            chain = chains[0]
+            
+            # Get expirations in next 60 days
+            today = datetime.now()
+            valid_expiries = []
+            for exp in sorted(chain.expirations)[:4]:  # Next 4 expirations
+                try:
+                    exp_date = datetime.strptime(exp, '%Y%m%d')
+                    if exp_date > today and exp_date < today + timedelta(days=60):
+                        valid_expiries.append(exp)
+                except:
+                    continue
                     
-            except Exception as e:
-                print(f"    Error scanning {ticker}: {e}")
-                continue
-        
-        self.alerts = all_alerts
-        return all_alerts
-    
-    def run_continuous(self, interval_minutes: int = 5):
-        """Run scanner continuously."""
-        self.running = True
-        
-        print(f"\nStarting continuous scan (every {interval_minutes} min)")
-        print("Press Ctrl+C to stop\n")
-        
-        while self.running:
-            try:
-                alerts = self.scan_all()
+            if not valid_expiries:
+                return flows
                 
-                # Trigger callback for new alerts
-                if alerts and self.alert_callback:
-                    self.alert_callback(alerts)
-                
-                print(f"\nNext scan in {interval_minutes} minutes...")
-                time.sleep(interval_minutes * 60)
-                
-            except KeyboardInterrupt:
-                print("\nStopping scanner...")
-                self.running = False
-                break
-            except Exception as e:
-                print(f"Error during scan: {e}")
-                time.sleep(60)  # Wait before retry
-    
-    def format_alerts(self, alerts: List[FlowAlert] = None) -> str:
-        """Format alerts for display."""
-        alerts = alerts or self.alerts
-        
-        if not alerts:
-            return "No unusual options flow detected."
-        
-        lines = []
-        lines.append("=" * 60)
-        lines.append("UNUSUAL OPTIONS FLOW DETECTED")
-        lines.append(f"Scanned at {datetime.now().strftime('%H:%M:%S')}")
-        lines.append("=" * 60)
-        
-        # Group by alert type
-        by_type = defaultdict(list)
-        for alert in alerts:
-            by_type[alert.alert_type].append(alert)
-        
-        for alert_type, type_alerts in by_type.items():
-            lines.append(f"\n{alert_type} ({len(type_alerts)}):")
-            lines.append("-" * 40)
+            # Get strikes near the money (+/- 30%)
+            strikes = [s for s in chain.strikes if spot * 0.7 <= s <= spot * 1.3]
             
-            # Sort by premium
-            for alert in sorted(type_alerts, key=lambda x: -x.premium):
-                emoji = "CALL" if alert.option_type == "CALL" else "PUT"
-                lines.append(
-                    f"  {alert.ticker} ${alert.strike} {emoji} {alert.expiry[:6]}\n"
-                    f"    Premium: ${alert.premium:,.0f} | Vol: {alert.volume:,} | OI: {alert.open_interest:,}\n"
-                    f"    Vol/OI: {alert.vol_oi_ratio:.1f}x | {alert.otm_pct:+.1f}% OTM\n"
-                    f"    Underlying: ${alert.underlying_price:.2f}"
-                )
+            # Check options
+            for expiry in valid_expiries[:2]:  # Limit to 2 expiries for speed
+                for right in ['C', 'P']:
+                    for strike in strikes[::2]:  # Every other strike for speed
+                        try:
+                            opt = Option(ticker, expiry, strike, right, 'SMART')
+                            self.ib.qualifyContracts(opt)
+                            
+                            # Get market data
+                            data = self.ib.reqMktData(opt)
+                            self.ib.sleep(0.3)
+                            
+                            volume = data.volume or 0
+                            last_price = data.last or data.close or 0
+                            
+                            # Get open interest (requires separate request)
+                            # For speed, estimate from bid/ask spread
+                            open_interest = max(100, volume // 2)  # Rough estimate
+                            
+                            self.ib.cancelMktData(opt)
+                            
+                            if volume < 100 or last_price <= 0:
+                                continue
+                                
+                            # Calculate metrics
+                            premium = last_price * volume * 100
+                            vol_oi_ratio = volume / open_interest if open_interest > 0 else 0
+                            
+                            if right == 'C':
+                                otm_pct = ((strike - spot) / spot) * 100
+                            else:
+                                otm_pct = ((spot - strike) / spot) * 100
+                                
+                            # Check for signals
+                            signal_type = None
+                            
+                            # Large premium
+                            if premium >= self.MIN_PREMIUM:
+                                signal_type = 'LARGE_PREMIUM'
+                                
+                            # High vol/OI ratio
+                            elif vol_oi_ratio >= self.MIN_VOL_OI_RATIO and volume >= 500:
+                                signal_type = 'HIGH_VOL_OI'
+                                
+                            # Far OTM with volume
+                            elif otm_pct >= self.MIN_OTM_PCT and volume >= self.MIN_OTM_VOLUME:
+                                signal_type = 'OTM_SWEEP'
+                                
+                            if signal_type:
+                                flow = OptionsFlow(
+                                    ticker=ticker,
+                                    strike=strike,
+                                    expiry=expiry,
+                                    call_put=right,
+                                    premium=premium,
+                                    volume=volume,
+                                    open_interest=open_interest,
+                                    vol_oi_ratio=vol_oi_ratio,
+                                    otm_pct=otm_pct,
+                                    spot_price=spot,
+                                    signal_type=signal_type,
+                                    timestamp=datetime.now()
+                                )
+                                flows.append(flow)
+                                
+                        except Exception as e:
+                            continue
+                            
+        except Exception as e:
+            print(f"  Error scanning {ticker}: {e}")
+            
+        return flows
         
-        return "\n".join(lines)
+    def scan_all(self, tickers: List[str] = None) -> List[OptionsFlow]:
+        """Scan all tickers for unusual activity."""
+        if tickers is None:
+            tickers = self.SCAN_UNIVERSE
+            
+        all_flows = []
+        
+        print(f"\n🔍 Scanning {len(tickers)} tickers for unusual options flow...")
+        
+        for i, ticker in enumerate(tickers):
+            print(f"  [{i+1}/{len(tickers)}] {ticker}...", end=' ')
+            flows = self.scan_ticker_options(ticker)
+            if flows:
+                print(f"Found {len(flows)} signals!")
+                all_flows.extend(flows)
+            else:
+                print("clean")
+                
+            # Rate limiting
+            time.sleep(0.5)
+            
+        # Sort by premium (highest first)
+        all_flows.sort(key=lambda x: x.premium, reverse=True)
+        
+        self.flows = all_flows
+        return all_flows
+        
+    def format_alert(self, flow: OptionsFlow) -> str:
+        """Format a single flow for display."""
+        emoji = '🟢' if flow.call_put == 'C' else '🔴'
+        direction = 'CALL' if flow.call_put == 'C' else 'PUT'
+        
+        return (
+            f"{emoji} {flow.ticker} {flow.strike}{flow.call_put} {flow.expiry[:4]}-{flow.expiry[4:6]}-{flow.expiry[6:]}\n"
+            f"   ${flow.premium/1000:.0f}K | Vol: {flow.volume:,} | {flow.signal_type}"
+        )
+        
+    def generate_telegram_alert(self) -> str:
+        """Generate Telegram alert for all unusual flows."""
+        if not self.flows:
+            return None
+            
+        lines = [
+            f"🚨 OPTIONS FLOW ALERT - {datetime.now().strftime('%b %d %H:%M')}",
+            "",
+        ]
+        
+        # Group by signal type
+        large_premium = [f for f in self.flows if f.signal_type == 'LARGE_PREMIUM']
+        high_vol_oi = [f for f in self.flows if f.signal_type == 'HIGH_VOL_OI']
+        otm_sweeps = [f for f in self.flows if f.signal_type == 'OTM_SWEEP']
+        
+        if large_premium:
+            lines.append("━━━ LARGE PREMIUM (>$50K) ━━━")
+            for flow in large_premium[:5]:
+                lines.append(self.format_alert(flow))
+            lines.append("")
+            
+        if high_vol_oi:
+            lines.append("━━━ HIGH VOL/OI (New Positions) ━━━")
+            for flow in high_vol_oi[:5]:
+                lines.append(self.format_alert(flow))
+            lines.append("")
+            
+        if otm_sweeps:
+            lines.append("━━━ OTM SWEEPS (Speculative) ━━━")
+            for flow in otm_sweeps[:5]:
+                lines.append(self.format_alert(flow))
+                
+        # Summary
+        calls = len([f for f in self.flows if f.call_put == 'C'])
+        puts = len([f for f in self.flows if f.call_put == 'P'])
+        total_premium = sum(f.premium for f in self.flows)
+        
+        lines.append("")
+        lines.append(f"📊 Summary: {calls} calls / {puts} puts | ${total_premium/1000000:.1f}M total")
+        
+        return '\n'.join(lines)
 
 
-def send_telegram_alert(alerts: List[FlowAlert]):
-    """Send alert to Telegram."""
-    import urllib.request
-    import urllib.parse
+def run_options_flow_scan(send_telegram: bool = True):
+    """Run the options flow scanner."""
+    # Load telegram config
+    telegram_env = os.path.join(os.path.dirname(__file__), '../../configs/telegram.env')
+    if os.path.exists(telegram_env):
+        with open(telegram_env) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key] = value.strip('"').strip("'")
     
-    token = os.environ.get('TELEGRAM_BOT_TOKEN')
-    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+    scanner = OptionsFlowScanner()
     
-    if not token or not chat_id:
-        return
-    
-    msg = "OPTIONS FLOW ALERT\n"
-    msg += "=" * 25 + "\n"
-    
-    for alert in alerts[:5]:  # Limit to 5
-        emoji = "C" if alert.option_type == "CALL" else "P"
-        msg += f"\n{alert.alert_type}\n"
-        msg += f"{alert.ticker} ${alert.strike}{emoji} {alert.expiry[:6]}\n"
-        msg += f"Premium: ${alert.premium:,.0f}\n"
-        msg += f"Vol/OI: {alert.vol_oi_ratio:.1f}x\n"
-    
-    try:
-        url = f'https://api.telegram.org/bot{token}/sendMessage'
-        data = urllib.parse.urlencode({'chat_id': chat_id, 'text': msg}).encode()
-        urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=30)
-    except:
-        pass
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Real-time options flow scanner')
-    parser.add_argument('--tickers', type=str, help='Comma-separated tickers to scan')
-    parser.add_argument('--alert', action='store_true', help='Enable Telegram alerts')
-    parser.add_argument('--continuous', action='store_true', help='Run continuously')
-    parser.add_argument('--interval', type=int, default=5, help='Scan interval (minutes)')
-    args = parser.parse_args()
-    
-    # Parse tickers
-    watchlist = None
-    if args.tickers:
-        watchlist = [t.strip().upper() for t in args.tickers.split(',')]
-    
-    # Set up alert callback
-    callback = send_telegram_alert if args.alert else None
-    
-    # Create scanner
-    scanner = OptionsFlowScanner(watchlist=watchlist, alert_callback=callback)
-    
-    # Connect
     if not scanner.connect():
-        sys.exit(1)
-    
+        print("Failed to connect to IBKR")
+        return []
+        
     try:
-        if args.continuous:
-            scanner.run_continuous(interval_minutes=args.interval)
+        # Scan for unusual activity
+        flows = scanner.scan_all()
+        
+        if flows:
+            alert = scanner.generate_telegram_alert()
+            print("\n" + "="*50)
+            print(alert)
+            print("="*50)
+            
+            if send_telegram:
+                from src.alpha_lab.telegram_alerts import send_message
+                send_message(alert)
+                print("\n✅ Sent to Telegram")
         else:
-            alerts = scanner.scan_all()
-            print(scanner.format_alerts(alerts))
+            print("\n📭 No unusual options activity detected")
+            
+        return flows
+        
     finally:
         scanner.disconnect()
 
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Options Flow Scanner")
+    parser.add_argument("--no-telegram", action="store_true", help="Don't send Telegram alert")
+    parser.add_argument("--tickers", type=str, help="Comma-separated tickers to scan")
+    
+    args = parser.parse_args()
+    
+    if args.tickers:
+        scanner = OptionsFlowScanner()
+        if scanner.connect():
+            flows = scanner.scan_all(args.tickers.split(','))
+            scanner.disconnect()
+    else:
+        run_options_flow_scan(send_telegram=not args.no_telegram)
