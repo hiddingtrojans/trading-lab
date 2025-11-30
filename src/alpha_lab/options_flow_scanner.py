@@ -52,21 +52,12 @@ class OptionsFlowScanner:
     MIN_OTM_PCT = 15           # 15%+ out of the money
     MIN_OTM_VOLUME = 500       # Minimum volume for OTM alerts
     
-    # Liquid stocks to scan (options need liquidity)
-    SCAN_UNIVERSE = [
-        # Mega caps - most liquid options
+    # Default universe - used ONLY if IBKR scanner unavailable
+    # When IBKR works, we scan the ENTIRE market for unusual options activity
+    FALLBACK_UNIVERSE = [
+        # Most liquid options (fallback only)
         'SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'META', 'GOOGL',
-        'AMD', 'NFLX', 'CRM', 'ORCL', 'ADBE', 'INTC',
-        # High beta / meme potential
-        'COIN', 'MARA', 'RIOT', 'HOOD', 'SOFI', 'PLTR', 'RIVN', 'LCID',
-        'GME', 'AMC', 'BBBY', 'BB',
-        # Sector ETFs
-        'XLF', 'XLE', 'XLK', 'XLV', 'XLI', 'ARKK', 'SOXL', 'TQQQ',
-        # Volatile mid-caps
-        'SNOW', 'NET', 'CRWD', 'DDOG', 'MDB', 'ZS', 'OKTA',
-        'SQ', 'PYPL', 'SHOP', 'ROKU', 'SNAP', 'PINS', 'UBER', 'LYFT',
-        # Biotech (big moves on news)
-        'MRNA', 'BNTX', 'XBI',
+        'AMD', 'NFLX', 'COIN', 'PLTR', 'SOFI',
     ]
     
     def __init__(self, host: str = '127.0.0.1', port: int = 4002):
@@ -81,11 +72,52 @@ class OptionsFlowScanner:
             from ib_insync import IB
             self.ib = IB()
             self.ib.connect(self.host, self.port, clientId=30, timeout=15)
-            print(f"✅ Connected to IBKR")
+            print(f"✅ Connected to IBKR - Full market scanning enabled")
             return True
         except Exception as e:
-            print(f"❌ IBKR connection failed: {e}")
+            print(f"⚠️ IBKR unavailable: {e}")
+            print(f"   Using fallback universe ({len(self.FALLBACK_UNIVERSE)} tickers)")
             return False
+    
+    def get_most_active_options_ibkr(self, top_n: int = 20) -> List[str]:
+        """
+        Use IBKR scanner to find stocks with most active options.
+        Returns tickers with unusual options volume - NOT a hardcoded list.
+        """
+        if not self.ib or not self.ib.isConnected():
+            return self.FALLBACK_UNIVERSE
+        
+        try:
+            from ib_insync import ScannerSubscription
+            
+            print("  📡 Scanning FULL market for active options...")
+            
+            # Scan for most active options by volume
+            scanner = ScannerSubscription(
+                instrument='STK',
+                locationCode='STK.US.MAJOR',
+                scanCode='OPT_VOLUME_MOST_ACTIVE',  # Most active by options volume
+                numberOfRows=top_n,
+                abovePrice=5,
+            )
+            
+            results = self.ib.reqScannerData(scanner)
+            
+            tickers = []
+            for item in results:
+                ticker = item.contractDetails.contract.symbol
+                tickers.append(ticker)
+            
+            if tickers:
+                print(f"  ✅ Found {len(tickers)} stocks with active options")
+                return tickers
+            else:
+                print("  ⚠️ Scanner returned empty, using fallback")
+                return self.FALLBACK_UNIVERSE
+                
+        except Exception as e:
+            print(f"  ⚠️ IBKR scanner failed: {e}")
+            return self.FALLBACK_UNIVERSE
             
     def disconnect(self):
         """Disconnect from IBKR."""
@@ -221,7 +253,8 @@ class OptionsFlowScanner:
     def scan_all(self, tickers: List[str] = None) -> List[OptionsFlow]:
         """Scan all tickers for unusual activity."""
         if tickers is None:
-            tickers = self.SCAN_UNIVERSE
+            # Try to get most active from IBKR, fallback to universe
+            tickers = self.get_most_active_options_ibkr(top_n=20)
             
         all_flows = []
         

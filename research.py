@@ -39,7 +39,33 @@ def run_quick_analysis(ticker: str):
     print("⚡ QUICK MODE (no GPT - free)")
     print("-" * 40)
     
-    # First, get news sentiment (FREE via Yahoo Finance + FinBERT)
+    # FIRST: Check earnings risk (CRITICAL)
+    try:
+        from src.alpha_lab.earnings_calendar import check_earnings_risk
+        earnings = check_earnings_risk(ticker)
+        
+        print()
+        if earnings['risk_level'] == 'HIGH':
+            print("  " + "="*50)
+            print(f"  ⛔ {earnings['message']}")
+            print("  ⛔ DO NOT BUY OPTIONS BEFORE EARNINGS")
+            print("  " + "="*50)
+            print()
+            proceed = input("  Continue anyway? (y/N): ").strip().lower()
+            if proceed != 'y':
+                print("  Aborted. Check again after earnings.")
+                return
+        elif earnings['risk_level'] == 'MEDIUM':
+            print(f"  {earnings['message']}")
+        elif earnings['risk_level'] == 'UNKNOWN':
+            print(f"  ⚠️ {earnings['message']}")
+        else:
+            print(f"  {earnings['message']}")
+        print()
+    except Exception as e:
+        print(f"  ⚠️ Earnings check failed: {e}")
+    
+    # Second: Get news sentiment (FREE via Yahoo Finance + FinBERT)
     try:
         from src.alpha_lab.news_sentiment import get_ticker_sentiment, print_sentiment_report
         sentiment_result = get_ticker_sentiment(ticker, max_articles=10)

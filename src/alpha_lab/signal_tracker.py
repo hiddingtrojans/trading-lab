@@ -270,7 +270,58 @@ def log_signals_from_scanner(signals: List[Dict]) -> List[str]:
     return ids
 
 
+def send_performance_telegram():
+    """Send performance report to Telegram."""
+    tracker = SignalTracker()
+    
+    # Check outcomes first
+    closed_today = tracker.check_outcomes()
+    
+    stats = tracker.get_stats()
+    
+    # Build message
+    lines = [
+        f"📊 SIGNAL PERFORMANCE",
+        "",
+        f"Win Rate: {stats['win_rate']}% ({stats['wins']}W/{stats['losses']}L)",
+        f"Open: {stats['open']} | Closed: {stats['total_closed']}",
+    ]
+    
+    # Report any that closed today
+    if closed_today:
+        lines.append("")
+        lines.append("━━━ CLOSED TODAY ━━━")
+        for s in closed_today:
+            emoji = "✅" if s['status'] == 'WIN' else "❌"
+            lines.append(f"{emoji} {s['ticker']}: {s['outcome']}")
+    
+    # Show open positions
+    open_signals = tracker.get_open_signals()
+    if open_signals:
+        lines.append("")
+        lines.append(f"━━━ OPEN ({len(open_signals)}) ━━━")
+        for s in open_signals[:5]:  # Top 5
+            lines.append(f"• {s['ticker']} @ ${s['entry']}")
+    
+    message = '\n'.join(lines)
+    
+    try:
+        from src.alpha_lab.telegram_alerts import send_message
+        send_message(message)
+        print("✅ Sent to Telegram")
+    except Exception as e:
+        print(f"❌ Telegram failed: {e}")
+    
+    return message
+
+
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--telegram", action="store_true", help="Send report to Telegram")
+    args = parser.parse_args()
+    
     tracker = SignalTracker()
     
     # Check outcomes of existing signals
@@ -284,4 +335,7 @@ if __name__ == "__main__":
     
     # Print report
     print(tracker.format_report())
+    
+    if args.telegram:
+        send_performance_telegram()
 
