@@ -39,30 +39,48 @@ def run_quick_analysis(ticker: str):
     print("⚡ QUICK MODE (no GPT - free)")
     print("-" * 40)
     
+    # First, get news sentiment (FREE via Yahoo Finance + FinBERT)
+    try:
+        from src.alpha_lab.news_sentiment import get_ticker_sentiment, print_sentiment_report
+        sentiment_result = get_ticker_sentiment(ticker, max_articles=10)
+        print_sentiment_report(sentiment_result)
+    except Exception as e:
+        print(f"  ⚠️ News sentiment unavailable: {e}")
+        sentiment_result = None
+    
+    # Then run fundamentals analysis
     try:
         from src.leaps.complete_leaps_system import CompleteLEAPSSystem
         
         system = CompleteLEAPSSystem(
             use_gpt=False,  # No GPT = free
             try_ibkr=True,
-            use_finbert=True
+            use_finbert=False  # We use our own news_sentiment instead
         )
         
-        result = system.run_full_analysis(ticker)
+        result = system.complete_systematic_analysis(ticker)
         
         if result:
-            print_summary(result, ticker)
+            system.display_complete_analysis(result)
         else:
             print(f"❌ Analysis failed for {ticker}")
             
     except Exception as e:
         print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def run_full_analysis(ticker: str):
     """Full analysis with GPT (costs ~$0.05)."""
     print("🤖 FULL MODE (GPT enabled - ~$0.05)")
     print("-" * 40)
+    print()
+    print("⚠️  HONEST WARNING:")
+    print("   GPT is NOT a replacement for real financial analysis.")
+    print("   It doesn't have real-time data and can hallucinate.")
+    print("   Use the fundamentals, not GPT predictions.")
+    print()
     
     # Check for OpenAI key
     if not os.environ.get('OPENAI_API_KEY'):
@@ -86,18 +104,20 @@ def run_full_analysis(ticker: str):
         system = CompleteLEAPSSystem(
             use_gpt=True,
             try_ibkr=True,
-            use_finbert=True
+            use_finbert=False  # FinBERT needs news source we don't have
         )
         
-        result = system.run_full_analysis(ticker)
+        result = system.complete_systematic_analysis(ticker)
         
         if result:
-            print_summary(result, ticker)
+            system.display_complete_analysis(result)
         else:
             print(f"❌ Analysis failed for {ticker}")
             
     except Exception as e:
         print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def run_leaps_focus(ticker: str):
