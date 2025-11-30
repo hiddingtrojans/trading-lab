@@ -15,30 +15,25 @@ ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204
 
 ---
 
-## 🔐 FIRST TIME SETUP: Add Your IBKR Credentials
+## 🔐 IB Gateway (Docker) - WORKING ✅
 
-**SSH into the server and edit the config file:**
+IB Gateway runs via Docker with auto-restart.
 
+**Check status:**
 ```bash
-ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204
-nano ~/ibgateway/ibc/config.ini
+ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204 "sudo docker ps"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204 "sudo docker logs ibgateway --tail 20"
 ```
 
-**Change these lines:**
-```
-IbLoginId=YOUR_IBKR_USERNAME
-IbPassword=YOUR_IBKR_PASSWORD
-TradingMode=paper   # Change to 'live' for live trading
-```
-
-**Then start IB Gateway:**
+**Restart if needed:**
 ```bash
-sudo systemctl start ibgateway
-sudo systemctl enable ibgateway  # Auto-start on boot
-
-# Check status
-sudo systemctl status ibgateway
+ssh -i ~/.ssh/scanner-key.pem ubuntu@98.92.17.204 "sudo docker restart ibgateway"
 ```
+
+**API Ports:**
+- 4001: Live trading
+- 4002: Paper trading (currently active)
+- 5900: VNC (for debugging)
 
 ---
 
