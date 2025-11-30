@@ -3,7 +3,7 @@
 ## Instance Details
 
 - **Instance ID**: i-080534024ab368273
-- **Public IP**: 98.92.17.204
+- **Public IP**: 44.222.217.236 (changes on restart)
 - **Region**: us-east-1
 - **Instance Type**: t3.micro (free tier eligible)
 
