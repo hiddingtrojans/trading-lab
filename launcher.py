@@ -310,6 +310,42 @@ def position_monitor():
     elif choice == "3":
         run_command("python src/alpha_lab/position_monitor.py --eod")
 
+
+def smart_money_scan():
+    """Scan for insider trades and hedge fund activity."""
+    print("\n🏛️ SMART MONEY SCANNER")
+    print("   Tracks insider trades and hedge fund 13F filings.")
+    print("   Data from SEC EDGAR (free, no API key).\n")
+    
+    print("   1. Scan Insider Trades (Form 4)")
+    print("   2. Check Hedge Fund Holdings (13F)")
+    print("   3. Berkshire Hathaway Top Holdings")
+    print("   4. Full Smart Money Scan")
+    
+    choice = input("\n   Enter choice (1-4): ")
+    
+    if choice == "1":
+        print("\n   Scanning for insider buys > $100K...")
+        run_command("python src/alpha_lab/sec_scanner.py --min-value 100000")
+    elif choice == "2":
+        print("\n   Available funds:")
+        print("   - Berkshire Hathaway")
+        print("   - Bridgewater Associates")
+        print("   - Renaissance Technologies")
+        print("   - Citadel Advisors")
+        print("   - Pershing Square")
+        fund = input("\n   Enter fund name (or press Enter for all): ").strip()
+        if fund:
+            run_command(f'python src/alpha_lab/hedge_fund_tracker.py --fund "{fund}" --changes')
+        else:
+            run_command("python src/alpha_lab/hedge_fund_tracker.py --changes")
+    elif choice == "3":
+        run_command("python src/alpha_lab/hedge_fund_tracker.py --fund \"Berkshire Hathaway\" --holdings")
+    elif choice == "4":
+        print("\n   Running full smart money scan...")
+        run_command("python src/alpha_lab/sec_scanner.py --min-value 100000")
+        run_command("python src/alpha_lab/hedge_fund_tracker.py --changes")
+
 def main():
     while True:
         clear_screen()
@@ -326,6 +362,7 @@ def main():
         print("   9. 📈  Performance Check (Did Signals Work?)")
         print("  10. 💰  Options Flow Scanner (IBKR)")
         print("  11. 🎯  Position Monitor (Stop/Target Alerts)")
+        print("  12. 🏛️  Smart Money Scanner (Insiders + 13F)")
         print("   0. ❌  Exit")
         
         choice = input("\nSelect an option: ")
@@ -352,6 +389,8 @@ def main():
             options_flow_scanner()
         elif choice == "11":
             position_monitor()
+        elif choice == "12":
+            smart_money_scan()
         elif choice == "0":
             print("\nGoodbye! Happy Trading.")
             sys.exit(0)

@@ -1,0 +1,69 @@
+name: Smart Money Scanner
+
+on:
+  schedule:
+    # Run at 6 PM ET (after market close) on weekdays
+    # SEC filings are typically processed after hours
+    - cron: '0 22 * * 1-5'
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  scan_smart_money:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          
+      - name: Scan Insider Trades
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          echo "=== Scanning for Insider Trades ==="
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from src.alpha_lab.sec_scanner import run_insider_scan
+          
+          # Scan major tickers for insider buys > $100K
+          buys = run_insider_scan(min_value=100000)
+          
+          if buys:
+              print(f'Found {len(buys)} significant insider buy(s)')
+          else:
+              print('No significant insider buys today')
+          "
+          
+      - name: Scan 13F Changes
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          echo "=== Scanning 13F Hedge Fund Filings ==="
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from src.alpha_lab.hedge_fund_tracker import run_13f_scan
+          
+          # Check major funds for position changes
+          changes = run_13f_scan(send_telegram=True)
+          
+          if changes:
+              print(f'Found {len(changes)} significant fund changes')
+          else:
+              print('No significant 13F changes')
+          "
+
