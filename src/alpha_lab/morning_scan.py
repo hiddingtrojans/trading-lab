@@ -4,6 +4,12 @@ Morning Scan - Consolidated Daily Alert
 Scans entire market via IBKR for unusual activity,
 combines with SEC insider data, regime, and sentiment.
 
+Generates ACTIONABLE alerts with:
+- Entry/exit levels
+- Trade thesis
+- Risk/reward
+- Saves to DB for tracking performance
+
 Sends ONE concise Telegram alert with top 3 opportunities.
 """
 
@@ -16,6 +22,8 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from src.alpha_lab.telegram_alerts import send_message
+from src.alpha_lab.signal_enricher import enrich_signal, format_actionable_alert
+from src.alpha_lab.signal_db import save_signal, get_performance_stats
 
 
 class MorningScan:
@@ -367,8 +375,8 @@ class MorningScan:
         # Placeholder for future enhancement
         return {}
         
-    def generate_alert(self) -> str:
-        """Generate the full morning alert message."""
+    def generate_alert(self, save_to_db: bool = True) -> str:
+        """Generate the full morning alert message with actionable signals."""
         print("\n🔍 Running Morning Scan...")
         
         # Get all data
@@ -380,6 +388,54 @@ class MorningScan:
         
         print("  • Checking insider trades...")
         insiders = self.get_insider_trades()
+        
+        # Enrich signals with actionable context
+        enriched_signals = []
+        if unusual:
+            print("  • Enriching signals with levels/thesis...")
+            for stock in unusual:
+                try:
+                    enriched = enrich_signal(
+                        ticker=stock['ticker'],
+                        change_pct=stock.get('change_pct', 0),
+                        volume_ratio=stock.get('vol_ratio', 1),
+                        market_cap_b=stock.get('market_cap_b'),
+                        entry_price=stock.get('price'),
+                    )
+                    if 'error' not in enriched:
+                        enriched['name'] = stock.get('name', '')
+                        enriched_signals.append(enriched)
+                except Exception as e:
+                    print(f"    Failed to enrich {stock['ticker']}: {e}")
+        
+        # Save signals to database
+        saved_ids = []
+        if save_to_db and enriched_signals:
+            print("  • Saving signals to database...")
+            for sig in enriched_signals:
+                try:
+                    signal_id = save_signal(
+                        ticker=sig['ticker'],
+                        signal_type=sig.get('signal_type', 'momentum'),
+                        trade_type=sig.get('trade_type', 'swing'),
+                        entry_price=sig['entry_price'],
+                        thesis=sig.get('thesis', ''),
+                        catalyst=sig.get('catalyst'),
+                        market_cap_b=sig.get('market_cap_b'),
+                        volume_ratio=sig.get('volume_ratio'),
+                        change_pct=sig.get('change_pct'),
+                        support=sig.get('support'),
+                        resistance=sig.get('resistance'),
+                        target_price=sig.get('target_price'),
+                        stop_loss=sig.get('stop_loss'),
+                        spy_price=regime.get('spy_price'),
+                        vix=regime.get('vix'),
+                        regime=regime.get('regime'),
+                    )
+                    saved_ids.append(signal_id)
+                    print(f"    Saved {sig['ticker']} as signal #{signal_id}")
+                except Exception as e:
+                    print(f"    Failed to save {sig['ticker']}: {e}")
         
         # Build message
         lines = [
@@ -394,37 +450,55 @@ class MorningScan:
         pre_tag = " 🌅" if regime.get('premarket') else ""
         lines.append(f"{regime_emoji} {regime['regime']} | SPY ${regime['spy_price']} ({spy_dir}{regime['spy_change']}%){pre_tag} | VIX {regime['vix']}")
         
-        # Unusual activity
+        # Actionable signals
         lines.append("")
         
-        if unusual:
+        if enriched_signals:
+            lines.append("━━━ 🎯 ACTIONABLE SIGNALS ━━━")
+            for sig in enriched_signals:
+                ticker = sig['ticker']
+                name = sig.get('name', '')[:20]
+                price = sig.get('entry_price', 0)
+                change = sig.get('change_pct', 0)
+                trade_type = sig.get('trade_type', 'swing').upper().replace('_', ' ')
+                thesis = sig.get('thesis', '')[:60]
+                
+                # Type emoji
+                type_emoji = {'DAY TRADE': '⚡', 'SWING': '🔄', 'LEAPS': '🎯'}.get(trade_type, '📊')
+                
+                # Direction
+                direction = "📈" if change > 0 else "📉"
+                change_str = f"+{change:.1f}%" if change >= 0 else f"{change:.1f}%"
+                
+                lines.append(f"{direction} {ticker} {change_str} @ ${price:.2f} | {type_emoji} {trade_type}")
+                lines.append(f"   {thesis}")
+                
+                # Levels for swing/leaps
+                if sig.get('trade_type') in ['swing', 'leaps']:
+                    target = sig.get('target_price', 0)
+                    stop = sig.get('stop_loss', 0)
+                    rr = sig.get('risk_reward', 0)
+                    if target and stop:
+                        lines.append(f"   🎯 ${target:.2f} | 🛑 ${stop:.2f} | R/R {rr:.1f}:1")
+                
+                lines.append("")
+        elif unusual:
+            # Fallback to basic format if enrichment failed
             lines.append("━━━ 🔥 TOP MOVERS ━━━")
             for stock in unusual:
                 ticker = stock['ticker']
-                name = stock.get('name', '')[:20]
                 price = stock.get('price', 0)
                 change = stock.get('change_pct', 0)
-                vol_ratio = stock.get('vol_ratio', 0)
-                mcap = stock.get('market_cap_b', 0)
-                is_pre = stock.get('premarket', False)
-                
-                # Format
                 change_str = f"+{change:.1f}%" if change >= 0 else f"{change:.1f}%"
-                vol_str = f"{vol_ratio:.1f}x vol" if vol_ratio > 1 else ""
-                mcap_str = f"${mcap:.1f}B" if mcap >= 1 else f"${mcap*1000:.0f}M"
-                pre_tag = " 🌅" if is_pre else ""
-                
-                lines.append(f"• {ticker} {change_str} @ ${price:.2f}{pre_tag}")
-                lines.append(f"  {name} | {mcap_str} | {vol_str}")
-        elif self.ib and self.ib.isConnected():
-            lines.append("━━━ MARKET SCAN ━━━")
-            lines.append("📴 Market closed - no movers")
+                lines.append(f"• {ticker} {change_str} @ ${price:.2f}")
         else:
             lines.append("━━━ MARKET SCAN ━━━")
-            lines.append("📡 IBKR offline - run during market hours")
+            if self.ib and self.ib.isConnected():
+                lines.append("📴 No significant movers found")
+            else:
+                lines.append("📡 IBKR offline - limited scan")
             
         # Insider trades
-        lines.append("")
         lines.append("━━━ INSIDER BUYING ━━━")
         
         if insiders:
@@ -437,6 +511,11 @@ class MorningScan:
                 lines.append(f"• {trade['ticker']} - {trade['title'][:15]} bought {val_str}")
         else:
             lines.append("No significant insider buys")
+        
+        # Performance tracking footer
+        if saved_ids:
+            lines.append("")
+            lines.append(f"📊 Tracked: {len(saved_ids)} signals saved")
             
         return "\n".join(lines)
         
