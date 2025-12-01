@@ -44,48 +44,93 @@ class MorningScan:
         """
         Scan ENTIRE US market for unusual volume via IBKR.
         
-        NO hardcoded lists - scans thousands of stocks.
+        Filters out:
+        - Leveraged ETFs (SOXS, TQQQ, etc.)
+        - Mega caps everyone watches
+        - Low-quality setups
         """
         results = []
         
         if not self.ib or not self.ib.isConnected():
             print("  IBKR not connected - cannot scan full market")
-            print("  (Run with IBKR to scan entire US market)")
             return []
             
         try:
-            from ib_insync import ScannerSubscription
+            from ib_insync import ScannerSubscription, Stock
+            import yfinance as yf
             
             print("  Scanning ENTIRE US market via IBKR...")
             
-            # Scan for most active stocks across ALL US stocks
+            # Scan for TOP GAINERS with volume (more actionable than just volume)
             scanner = ScannerSubscription(
                 instrument='STK',
-                locationCode='STK.US.MAJOR',  # ALL major US exchanges
-                scanCode='MOST_ACTIVE',       # Most active by volume
-                numberOfRows=top_n * 5,       # Get extra to filter mega-caps
+                locationCode='STK.US.MAJOR',
+                scanCode='TOP_PERC_GAIN',  # Top percentage gainers
+                numberOfRows=30,
+                abovePrice=5,
+                marketCapAbove=300000000,  # $300M+ (avoid penny stocks)
             )
             
             scan_data = self.ib.reqScannerData(scanner)
             
-            # Filter out boring mega-caps everyone watches
-            mega_caps = {'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.A', 'BRK.B', 'SPY', 'QQQ'}
+            # Filter out garbage
+            skip_tickers = {
+                # Mega caps
+                'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.A', 'BRK.B',
+                # Index ETFs
+                'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI',
+                # Leveraged ETFs (useless noise)
+                'SOXS', 'SOXL', 'TQQQ', 'SQQQ', 'UVXY', 'SVXY', 'SPXU', 'SPXS',
+                'LABU', 'LABD', 'NUGT', 'DUST', 'JNUG', 'JDST', 'TNA', 'TZA',
+                'FAS', 'FAZ', 'ERX', 'ERY', 'GUSH', 'DRIP', 'BOIL', 'KOLD',
+                'FNGU', 'FNGD', 'TECL', 'TECS', 'BULZ', 'BERZ', 'WEBL', 'WEBS',
+                'NAIL', 'DRN', 'DRV', 'CURE', 'PILL', 'RETL', 'MIDU', 'MIDZ',
+                'UDOW', 'SDOW', 'UPRO', 'YANG', 'YINN', 'EDC', 'EDZ',
+                'MSTU', 'MSTX', 'MSTZ', 'CONL', 'CONY', 'TSLL', 'TSLS',
+                'NVDL', 'NVDS', 'NVDX', 'AMDL', 'AMDS', 'GOOGL', 'GOOX',
+            }
             
             for item in scan_data:
                 contract = item.contractDetails.contract
                 ticker = contract.symbol
                 
-                if ticker in mega_caps:
+                if ticker in skip_tickers:
+                    continue
+                
+                # Skip anything with numbers in ticker (usually leveraged)
+                if any(c.isdigit() for c in ticker):
                     continue
                     
-                name = item.contractDetails.longName[:25] if item.contractDetails.longName else ticker
-                
-                results.append({
-                    'ticker': ticker,
-                    'name': name,
-                    'vol_ratio': 'high',  # IBKR already filtered for high volume
-                    'setup': 'volume surge',
-                })
+                # Get more info via yfinance
+                try:
+                    stock = yf.Ticker(ticker)
+                    info = stock.info
+                    
+                    price = info.get('currentPrice') or info.get('regularMarketPrice', 0)
+                    change_pct = info.get('regularMarketChangePercent', 0)
+                    volume = info.get('volume', 0)
+                    avg_volume = info.get('averageVolume', 1)
+                    market_cap = info.get('marketCap', 0)
+                    name = info.get('shortName', ticker)[:30]
+                    
+                    # Calculate volume ratio
+                    vol_ratio = volume / avg_volume if avg_volume > 0 else 0
+                    
+                    # Skip if not actually unusual
+                    if vol_ratio < 1.5 and change_pct < 5:
+                        continue
+                    
+                    results.append({
+                        'ticker': ticker,
+                        'name': name,
+                        'price': price,
+                        'change_pct': change_pct,
+                        'vol_ratio': vol_ratio,
+                        'market_cap_b': market_cap / 1e9 if market_cap else 0,
+                    })
+                    
+                except:
+                    continue
                     
                 if len(results) >= top_n:
                     break
@@ -94,6 +139,8 @@ class MorningScan:
             print(f"  IBKR scan error: {e}")
             return []
             
+        # Sort by change % (biggest movers first)
+        results.sort(key=lambda x: x.get('change_pct', 0), reverse=True)
         return results[:top_n]
         
         
@@ -227,12 +274,23 @@ class MorningScan:
         lines.append("")
         
         if unusual:
-            lines.append("━━━ UNUSUAL VOLUME (Full US Market) ━━━")
-            for i, stock in enumerate(unusual, 1):
-                name = stock.get('name', '')
-                lines.append(f"{i}. {stock['ticker']} - {name}")
+            lines.append("━━━ 🔥 TOP MOVERS (Full US Scan) ━━━")
+            for stock in unusual:
+                ticker = stock['ticker']
+                name = stock.get('name', '')[:20]
+                price = stock.get('price', 0)
+                change = stock.get('change_pct', 0)
+                vol_ratio = stock.get('vol_ratio', 0)
+                mcap = stock.get('market_cap_b', 0)
+                
+                # Format line with actual useful info
+                change_str = f"+{change:.1f}%" if change >= 0 else f"{change:.1f}%"
+                vol_str = f"{vol_ratio:.1f}x vol" if vol_ratio > 1 else ""
+                mcap_str = f"${mcap:.1f}B" if mcap >= 1 else f"${mcap*1000:.0f}M"
+                
+                lines.append(f"• {ticker} {change_str} @ ${price:.2f}")
+                lines.append(f"  {name} | {mcap_str} | {vol_str}")
         else:
-            # No IBKR = show this is a limitation
             lines.append("━━━ MARKET SCAN ━━━")
             lines.append("📡 IBKR offline - limited to SEC data")
             

@@ -121,3 +121,4 @@ alias gaps='echo "Find stocks gapping up 3%+ on volume"'
 
 
 
+
