@@ -44,7 +44,7 @@ Run the options flow scanner 24/7 on AWS Free Tier with IB Gateway.
 
 ```bash
 # SSH into your instance
-ssh -i your-key.pem ubuntu@<your-instance-ip>
+ssh -i your-key.pem ubuntu@34.239.166.157  # Current IP as of Dec 2025
 
 # Run the setup script
 curl -sSL https://raw.githubusercontent.com/hiddingtrojans/trading-lab/main/deploy/aws/setup.sh | bash
