@@ -288,15 +288,30 @@ class BusinessAnalyzer:
         """Get recent news headlines."""
         try:
             news = self.stock.news
-            return [
-                {
-                    'title': n.get('title', ''),
-                    'publisher': n.get('publisher', ''),
-                    'date': datetime.fromtimestamp(n.get('providerPublishTime', 0)).strftime('%Y-%m-%d'),
+            if not news:
+                return []
+            
+            result = []
+            for n in news[:5]:
+                title = n.get('title', '')
+                if not title or title == '...':
+                    continue
+                
+                # Handle timestamp - skip if invalid (Unix epoch 0)
+                timestamp = n.get('providerPublishTime', 0)
+                if timestamp and timestamp > 946684800:  # After year 2000
+                    date_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
+                else:
+                    date_str = 'Recent'
+                
+                result.append({
+                    'title': title,
+                    'publisher': n.get('publisher', 'Unknown'),
+                    'date': date_str,
                     'link': n.get('link', ''),
-                }
-                for n in news[:5]
-            ]
+                })
+            
+            return result
         except:
             return []
     
@@ -369,8 +384,11 @@ class BusinessAnalyzer:
                 "─" * 60,
             ])
             for news in p.recent_news[:3]:
-                lines.append(f"  📰 {news['title'][:60]}...")
-                lines.append(f"     {news['publisher']} | {news['date']}")
+                title = news.get('title', '')
+                if title and len(title) > 3:  # Skip empty or very short titles
+                    display_title = title[:60] + "..." if len(title) > 60 else title
+                    lines.append(f"  📰 {display_title}")
+                    lines.append(f"     {news.get('publisher', '')} | {news.get('date', 'Recent')}")
         
         lines.extend([
             "",

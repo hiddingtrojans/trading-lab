@@ -117,8 +117,12 @@ class FundamentalAnalyzer:
         # Cash flow
         fcf = info.get('freeCashflow', 0) / 1e9
         ocf = info.get('operatingCashflow', 0) / 1e9
-        revenue = info.get('totalRevenue', 1)
-        fcf_margin = (info.get('freeCashflow', 0) / revenue * 100) if revenue else 0
+        revenue = info.get('totalRevenue', 0)
+        # Only calculate FCF margin if revenue is meaningful (> $1M)
+        if revenue and revenue > 1_000_000:
+            fcf_margin = (info.get('freeCashflow', 0) / revenue * 100)
+        else:
+            fcf_margin = 0  # Pre-revenue company
         
         # Balance sheet
         total_cash = info.get('totalCash', 0) / 1e9
