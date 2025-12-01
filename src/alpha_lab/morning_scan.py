@@ -140,37 +140,21 @@ class MorningScan:
         return results[:top_n]
     
     def _scan_ibkr(self, top_n: int = 3) -> List[Dict]:
-        """Scan via IBKR scanner."""
+        """Scan via IBKR scanner - uses MOST_ACTIVE then filters with yfinance."""
         results = []
         
         if not self.ib or not self.ib.isConnected():
             return []
             
         try:
-            from ib_insync import ScannerSubscription, Stock
+            from ib_insync import ScannerSubscription
             import yfinance as yf
             
             print("  Scanning ENTIRE US market via IBKR...")
             
-            # Scan for TOP GAINERS with volume (more actionable than just volume)
-            scanner = ScannerSubscription(
-                instrument='STK',
-                locationCode='STK.US.MAJOR',
-                scanCode='TOP_PERC_GAIN',  # Top percentage gainers
-                numberOfRows=30,
-                abovePrice=5,
-                marketCapAbove=300000000,  # $300M+ (avoid penny stocks)
-            )
-            
-            scan_data = self.ib.reqScannerData(scanner)
-            
-            # Filter out garbage
+            # Garbage to skip (leveraged ETFs, etc)
             skip_tickers = {
-                # Mega caps
-                'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.A', 'BRK.B',
-                # Index ETFs
                 'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI',
-                # Leveraged ETFs (useless noise)
                 'SOXS', 'SOXL', 'TQQQ', 'SQQQ', 'UVXY', 'SVXY', 'SPXU', 'SPXS',
                 'LABU', 'LABD', 'NUGT', 'DUST', 'JNUG', 'JDST', 'TNA', 'TZA',
                 'FAS', 'FAZ', 'ERX', 'ERY', 'GUSH', 'DRIP', 'BOIL', 'KOLD',
@@ -178,60 +162,87 @@ class MorningScan:
                 'NAIL', 'DRN', 'DRV', 'CURE', 'PILL', 'RETL', 'MIDU', 'MIDZ',
                 'UDOW', 'SDOW', 'UPRO', 'YANG', 'YINN', 'EDC', 'EDZ',
                 'MSTU', 'MSTX', 'MSTZ', 'CONL', 'CONY', 'TSLL', 'TSLS',
-                'NVDL', 'NVDS', 'NVDX', 'AMDL', 'AMDS', 'GOOGL', 'GOOX',
+                'NVDL', 'NVDS', 'NVDX', 'AMDL', 'AMDS', 'GOOX', 'DRCT',
             }
             
+            # Use MOST_ACTIVE - works better on paper accounts
+            # (price/marketCap filters don't work on paper)
+            scanner = ScannerSubscription(
+                instrument='STK',
+                locationCode='STK.US.MAJOR',
+                scanCode='MOST_ACTIVE',
+                numberOfRows=50,
+            )
+            
+            scan_data = self.ib.reqScannerData(scanner)
+            print(f"  IBKR returned {len(scan_data)} tickers")
+            
+            candidates = []
             for item in scan_data:
-                contract = item.contractDetails.contract
-                ticker = contract.symbol
+                ticker = item.contractDetails.contract.symbol
                 
+                # Skip garbage
                 if ticker in skip_tickers:
                     continue
-                
-                # Skip anything with numbers in ticker (usually leveraged)
                 if any(c.isdigit() for c in ticker):
                     continue
+                if ' ' in ticker or len(ticker) > 5:
+                    continue
                     
-                # Get more info via yfinance
+                candidates.append(ticker)
+            
+            print(f"  Checking {len(candidates[:20])} candidates with yfinance...")
+            
+            # Get real data from yfinance for each candidate
+            for ticker in candidates[:20]:
                 try:
                     stock = yf.Ticker(ticker)
                     info = stock.info
                     
-                    price = info.get('currentPrice') or info.get('regularMarketPrice', 0)
-                    change_pct = info.get('regularMarketChangePercent', 0)
+                    # Get prices - calculate change manually for accuracy
+                    prev_close = info.get('previousClose', 0)
+                    price = info.get('regularMarketPrice') or info.get('currentPrice', 0)
+                    
+                    if not price or not prev_close or prev_close == 0:
+                        continue
+                    
+                    change_pct = ((price - prev_close) / prev_close) * 100
+                    market_cap = info.get('marketCap', 0)
                     volume = info.get('volume', 0)
                     avg_volume = info.get('averageVolume', 1)
-                    market_cap = info.get('marketCap', 0)
                     name = info.get('shortName', ticker)[:30]
                     
-                    # Calculate volume ratio
+                    # Filter: price > $5, market cap > $500M
+                    if price < 5:
+                        continue
+                    if market_cap < 500_000_000:
+                        continue
+                    
                     vol_ratio = volume / avg_volume if avg_volume > 0 else 0
                     
-                    # Skip if not actually unusual
-                    if vol_ratio < 1.5 and change_pct < 5:
+                    # Only significant movers (>2% change OR >2x volume)
+                    if abs(change_pct) < 2 and vol_ratio < 2:
                         continue
                     
                     results.append({
                         'ticker': ticker,
                         'name': name,
-                        'price': price,
-                        'change_pct': change_pct,
-                        'vol_ratio': vol_ratio,
-                        'market_cap_b': market_cap / 1e9 if market_cap else 0,
+                        'price': round(price, 2),
+                        'change_pct': round(change_pct, 1),
+                        'vol_ratio': round(vol_ratio, 1),
+                        'market_cap_b': round(market_cap / 1e9, 1),
+                        'premarket': False,
                     })
                     
-                except:
+                except Exception as e:
                     continue
-                    
-                if len(results) >= top_n:
-                    break
                     
         except Exception as e:
             print(f"  IBKR scan error: {e}")
             return []
             
-        # Sort by change % (biggest movers first)
-        results.sort(key=lambda x: x.get('change_pct', 0), reverse=True)
+        # Sort by absolute change % (biggest movers first)
+        results.sort(key=lambda x: abs(x.get('change_pct', 0)), reverse=True)
         return results[:top_n]
         
         
