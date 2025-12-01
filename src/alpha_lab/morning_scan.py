@@ -42,17 +42,100 @@ class MorningScan:
             
     def scan_unusual_volume(self, top_n: int = 3) -> List[Dict]:
         """
-        Scan ENTIRE US market for unusual volume via IBKR.
+        Scan for unusual volume/movers.
         
-        Filters out:
-        - Leveraged ETFs (SOXS, TQQQ, etc.)
-        - Mega caps everyone watches
-        - Low-quality setups
+        Uses IBKR if available, falls back to yfinance premarket scan.
         """
+        # Try IBKR first
+        if self.ib and self.ib.isConnected():
+            results = self._scan_ibkr(top_n)
+            if results:
+                return results
+        
+        # Fallback: yfinance premarket scan
+        print("  Using yfinance premarket scan...")
+        return self._scan_yfinance_premarket(top_n)
+    
+    def _scan_yfinance_premarket(self, top_n: int = 3) -> List[Dict]:
+        """Scan premarket movers using yfinance."""
+        import yfinance as yf
+        
+        results = []
+        
+        # Scan a universe of liquid stocks for premarket activity
+        universe = [
+            # Tech
+            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'INTC', 'CRM',
+            'ORCL', 'ADBE', 'NOW', 'SNOW', 'PLTR', 'CRWD', 'NET', 'DDOG', 'ZS', 'MDB',
+            'PANW', 'FTNT', 'UBER', 'ABNB', 'SQ', 'SHOP', 'COIN', 'MARA', 'RIOT', 'MSTR',
+            # Semiconductors
+            'AVGO', 'QCOM', 'TXN', 'MU', 'LRCX', 'KLAC', 'AMAT', 'ASML', 'ARM', 'SMCI',
+            # Healthcare
+            'UNH', 'JNJ', 'LLY', 'PFE', 'ABBV', 'MRK', 'TMO', 'ABT', 'DHR', 'BMY',
+            # Finance
+            'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'BLK', 'SCHW', 'AXP', 'V', 'MA',
+            # Energy
+            'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'OXY', 'MPC', 'VLO', 'PSX',
+            # Industrial
+            'CAT', 'DE', 'BA', 'RTX', 'LMT', 'GE', 'HON', 'UNP', 'UPS', 'FDX',
+            # Consumer
+            'AMZN', 'WMT', 'COST', 'HD', 'LOW', 'TGT', 'NKE', 'SBUX', 'MCD', 'DIS',
+            # Recent movers (small/mid cap)
+            'IONQ', 'RGTI', 'QUBT', 'KULR', 'RKLB', 'LUNR', 'RDW', 'ASTS', 'JOBY',
+        ]
+        
+        # Remove duplicates
+        universe = list(set(universe))
+        
+        skip_tickers = {'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI'}
+        
+        for ticker in universe:
+            if ticker in skip_tickers:
+                continue
+            try:
+                stock = yf.Ticker(ticker)
+                info = stock.info
+                
+                # Get premarket data
+                pre_price = info.get('preMarketPrice')
+                prev_close = info.get('previousClose', 0)
+                
+                if not pre_price or not prev_close:
+                    continue
+                
+                change_pct = ((pre_price - prev_close) / prev_close) * 100
+                
+                # Only include significant movers (>2% in premarket)
+                if abs(change_pct) < 2:
+                    continue
+                
+                volume = info.get('volume', 0)
+                avg_volume = info.get('averageVolume', 1)
+                vol_ratio = volume / avg_volume if avg_volume > 0 else 0
+                market_cap = info.get('marketCap', 0)
+                name = info.get('shortName', ticker)[:30]
+                
+                results.append({
+                    'ticker': ticker,
+                    'name': name,
+                    'price': pre_price,
+                    'change_pct': change_pct,
+                    'vol_ratio': vol_ratio,
+                    'market_cap_b': market_cap / 1e9 if market_cap else 0,
+                    'premarket': True,
+                })
+            except:
+                continue
+        
+        # Sort by absolute change (biggest movers)
+        results.sort(key=lambda x: abs(x.get('change_pct', 0)), reverse=True)
+        return results[:top_n]
+    
+    def _scan_ibkr(self, top_n: int = 3) -> List[Dict]:
+        """Scan via IBKR scanner."""
         results = []
         
         if not self.ib or not self.ib.isConnected():
-            print("  IBKR not connected - cannot scan full market")
             return []
             
         try:
