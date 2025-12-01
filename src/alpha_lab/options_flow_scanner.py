@@ -71,7 +71,7 @@ class OptionsFlowScanner:
         try:
             from ib_insync import IB
             self.ib = IB()
-            self.ib.connect(self.host, self.port, clientId=30, timeout=15)
+            self.ib.connect(self.host, self.port, clientId=30, timeout=30, readonly=True)
             print(f"✅ Connected to IBKR - Full market scanning enabled")
             return True
         except Exception as e:
