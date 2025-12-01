@@ -296,44 +296,116 @@ class OptionsFlowScanner:
         )
         
     def generate_telegram_alert(self) -> str:
-        """Generate Telegram alert for all unusual flows."""
+        """Generate ACTIONABLE Telegram alert."""
         if not self.flows:
             return None
+        
+        # Filter out likely hedges (far OTM puts on mega caps with huge premium)
+        actionable_flows = []
+        for f in self.flows:
+            # Skip far OTM puts that look like hedges
+            if f.call_put == 'P' and f.otm_pct > 30 and f.premium > 10_000_000:
+                continue
+            # Skip very short-dated options (likely day trades/hedges)
+            try:
+                exp_date = datetime.strptime(f.expiry, '%Y%m%d')
+                if (exp_date - datetime.now()).days < 3:
+                    continue
+            except:
+                pass
+            actionable_flows.append(f)
+        
+        if not actionable_flows:
+            return None
+        
+        # Analyze sentiment by ticker
+        ticker_sentiment = {}
+        for f in actionable_flows:
+            if f.ticker not in ticker_sentiment:
+                ticker_sentiment[f.ticker] = {'calls': 0, 'puts': 0, 'call_premium': 0, 'put_premium': 0}
+            if f.call_put == 'C':
+                ticker_sentiment[f.ticker]['calls'] += 1
+                ticker_sentiment[f.ticker]['call_premium'] += f.premium
+            else:
+                ticker_sentiment[f.ticker]['puts'] += 1
+                ticker_sentiment[f.ticker]['put_premium'] += f.premium
+        
+        # Find strongest signals
+        bullish_signals = []
+        bearish_signals = []
+        
+        for ticker, data in ticker_sentiment.items():
+            call_prem = data['call_premium']
+            put_prem = data['put_premium']
             
+            if call_prem > put_prem * 2 and call_prem > 1_000_000:
+                bullish_signals.append((ticker, call_prem, data['calls']))
+            elif put_prem > call_prem * 2 and put_prem > 1_000_000:
+                bearish_signals.append((ticker, put_prem, data['puts']))
+        
+        # Sort by premium
+        bullish_signals.sort(key=lambda x: x[1], reverse=True)
+        bearish_signals.sort(key=lambda x: x[1], reverse=True)
+        
         lines = [
-            f"🚨 OPTIONS FLOW ALERT - {datetime.now().strftime('%b %d %H:%M')}",
+            f"🎯 SMART MONEY FLOW - {datetime.now().strftime('%b %d %H:%M')}",
             "",
         ]
         
-        # Group by signal type
-        large_premium = [f for f in self.flows if f.signal_type == 'LARGE_PREMIUM']
-        high_vol_oi = [f for f in self.flows if f.signal_type == 'HIGH_VOL_OI']
-        otm_sweeps = [f for f in self.flows if f.signal_type == 'OTM_SWEEP']
+        # Bullish signals with trade idea
+        if bullish_signals:
+            lines.append("━━━ 🟢 BULLISH BETS ━━━")
+            for ticker, premium, count in bullish_signals[:3]:
+                prem_str = f"${premium/1_000_000:.1f}M" if premium >= 1_000_000 else f"${premium/1_000:.0f}K"
+                # Get the best call flow for this ticker
+                best_call = max([f for f in actionable_flows if f.ticker == ticker and f.call_put == 'C'], 
+                               key=lambda x: x.premium, default=None)
+                if best_call:
+                    lines.append(f"📈 {ticker} - {prem_str} in calls")
+                    lines.append(f"   Top bet: ${best_call.strike} call exp {best_call.expiry[4:6]}/{best_call.expiry[6:]}")
+                    lines.append(f"   💡 TRADE: Buy {ticker} shares or ATM calls")
+                    lines.append("")
         
-        if large_premium:
-            lines.append("━━━ LARGE PREMIUM (>$50K) ━━━")
-            for flow in large_premium[:5]:
-                lines.append(self.format_alert(flow))
-            lines.append("")
-            
-        if high_vol_oi:
-            lines.append("━━━ HIGH VOL/OI (New Positions) ━━━")
-            for flow in high_vol_oi[:5]:
-                lines.append(self.format_alert(flow))
-            lines.append("")
-            
-        if otm_sweeps:
-            lines.append("━━━ OTM SWEEPS (Speculative) ━━━")
-            for flow in otm_sweeps[:5]:
-                lines.append(self.format_alert(flow))
-                
-        # Summary
-        calls = len([f for f in self.flows if f.call_put == 'C'])
-        puts = len([f for f in self.flows if f.call_put == 'P'])
-        total_premium = sum(f.premium for f in self.flows)
+        # Bearish signals with trade idea
+        if bearish_signals:
+            lines.append("━━━ 🔴 BEARISH BETS ━━━")
+            for ticker, premium, count in bearish_signals[:3]:
+                prem_str = f"${premium/1_000_000:.1f}M" if premium >= 1_000_000 else f"${premium/1_000:.0f}K"
+                best_put = max([f for f in actionable_flows if f.ticker == ticker and f.call_put == 'P'],
+                              key=lambda x: x.premium, default=None)
+                if best_put:
+                    lines.append(f"📉 {ticker} - {prem_str} in puts")
+                    lines.append(f"   Top bet: ${best_put.strike} put exp {best_put.expiry[4:6]}/{best_put.expiry[6:]}")
+                    lines.append(f"   💡 TRADE: Avoid longs or buy puts")
+                    lines.append("")
         
-        lines.append("")
-        lines.append(f"📊 Summary: {calls} calls / {puts} puts | ${total_premium/1000000:.1f}M total")
+        # Speculative OTM bets (potential runners)
+        otm_bets = [f for f in actionable_flows if f.signal_type == 'OTM_SWEEP' and f.call_put == 'C']
+        otm_bets.sort(key=lambda x: x.premium, reverse=True)
+        
+        if otm_bets:
+            lines.append("━━━ 🎰 SPECULATIVE BETS ━━━")
+            for flow in otm_bets[:3]:
+                lines.append(f"🚀 {flow.ticker} ${flow.strike}C ({flow.otm_pct:.0f}% OTM)")
+                lines.append(f"   ${flow.premium/1000:.0f}K bet on {flow.expiry[4:6]}/{flow.expiry[6:]} exp")
+                lines.append(f"   💡 High risk lottery ticket")
+                lines.append("")
+        
+        # Overall sentiment
+        total_calls = sum(1 for f in actionable_flows if f.call_put == 'C')
+        total_puts = sum(1 for f in actionable_flows if f.call_put == 'P')
+        call_prem = sum(f.premium for f in actionable_flows if f.call_put == 'C')
+        put_prem = sum(f.premium for f in actionable_flows if f.call_put == 'P')
+        
+        if call_prem > put_prem * 1.5:
+            sentiment = "🟢 BULLISH"
+        elif put_prem > call_prem * 1.5:
+            sentiment = "🔴 BEARISH"
+        else:
+            sentiment = "⚪ NEUTRAL"
+        
+        lines.append(f"📊 Overall: {sentiment}")
+        lines.append(f"   Calls: ${call_prem/1_000_000:.0f}M | Puts: ${put_prem/1_000_000:.0f}M")
         
         return '\n'.join(lines)
 
