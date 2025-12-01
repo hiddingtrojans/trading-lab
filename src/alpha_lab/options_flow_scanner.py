@@ -125,130 +125,137 @@ class OptionsFlowScanner:
             self.ib.disconnect()
             
     def get_spot_price(self, ticker: str) -> Optional[float]:
-        """Get current stock price."""
+        """Get current stock price - uses yfinance for reliability."""
         try:
-            from ib_insync import Stock
-            contract = Stock(ticker, 'SMART', 'USD')
-            self.ib.qualifyContracts(contract)
-            ticker_data = self.ib.reqMktData(contract)
-            self.ib.sleep(0.5)
-            price = ticker_data.last or ticker_data.close
-            self.ib.cancelMktData(contract)
-            return price
+            import yfinance as yf
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            price = info.get('regularMarketPrice') or info.get('currentPrice')
+            if price:
+                return float(price)
+            # Fallback to historical
+            hist = stock.history(period='1d')
+            if len(hist) > 0:
+                return float(hist['Close'].iloc[-1])
         except:
-            return None
+            pass
+        return None
             
     def scan_ticker_options(self, ticker: str) -> List[OptionsFlow]:
-        """Scan a single ticker for unusual options activity."""
+        """Scan a single ticker for unusual options activity using yfinance."""
         flows = []
         
         try:
-            from ib_insync import Stock, Option
+            import yfinance as yf
+            
+            stock = yf.Ticker(ticker)
             
             # Get spot price
             spot = self.get_spot_price(ticker)
             if not spot:
                 return flows
-                
-            # Get option chains for next 2 months
-            stock = Stock(ticker, 'SMART', 'USD')
-            self.ib.qualifyContracts(stock)
             
-            chains = self.ib.reqSecDefOptParams(stock.symbol, '', stock.secType, stock.conId)
-            if not chains:
+            # Get available expirations
+            try:
+                expirations = stock.options
+            except:
                 return flows
                 
-            chain = chains[0]
+            if not expirations:
+                return flows
             
-            # Get expirations in next 60 days
+            # Check next 2 expirations
             today = datetime.now()
-            valid_expiries = []
-            for exp in sorted(chain.expirations)[:4]:  # Next 4 expirations
+            for exp_str in expirations[:3]:
                 try:
-                    exp_date = datetime.strptime(exp, '%Y%m%d')
-                    if exp_date > today and exp_date < today + timedelta(days=60):
-                        valid_expiries.append(exp)
-                except:
+                    exp_date = datetime.strptime(exp_str, '%Y-%m-%d')
+                    if exp_date < today:
+                        continue
+                    if exp_date > today + timedelta(days=45):
+                        continue
+                        
+                    # Get option chain
+                    chain = stock.option_chain(exp_str)
+                    
+                    # Check calls
+                    for _, row in chain.calls.iterrows():
+                        flow = self._check_option_row(
+                            ticker, spot, exp_str, 'C', row
+                        )
+                        if flow:
+                            flows.append(flow)
+                    
+                    # Check puts  
+                    for _, row in chain.puts.iterrows():
+                        flow = self._check_option_row(
+                            ticker, spot, exp_str, 'P', row
+                        )
+                        if flow:
+                            flows.append(flow)
+                            
+                except Exception as e:
                     continue
                     
-            if not valid_expiries:
-                return flows
-                
-            # Get strikes near the money (+/- 30%)
-            strikes = [s for s in chain.strikes if spot * 0.7 <= s <= spot * 1.3]
-            
-            # Check options
-            for expiry in valid_expiries[:2]:  # Limit to 2 expiries for speed
-                for right in ['C', 'P']:
-                    for strike in strikes[::2]:  # Every other strike for speed
-                        try:
-                            opt = Option(ticker, expiry, strike, right, 'SMART')
-                            self.ib.qualifyContracts(opt)
-                            
-                            # Get market data
-                            data = self.ib.reqMktData(opt)
-                            self.ib.sleep(0.3)
-                            
-                            volume = data.volume or 0
-                            last_price = data.last or data.close or 0
-                            
-                            # Get open interest (requires separate request)
-                            # For speed, estimate from bid/ask spread
-                            open_interest = max(100, volume // 2)  # Rough estimate
-                            
-                            self.ib.cancelMktData(opt)
-                            
-                            if volume < 100 or last_price <= 0:
-                                continue
-                                
-                            # Calculate metrics
-                            premium = last_price * volume * 100
-                            vol_oi_ratio = volume / open_interest if open_interest > 0 else 0
-                            
-                            if right == 'C':
-                                otm_pct = ((strike - spot) / spot) * 100
-                            else:
-                                otm_pct = ((spot - strike) / spot) * 100
-                                
-                            # Check for signals
-                            signal_type = None
-                            
-                            # Large premium
-                            if premium >= self.MIN_PREMIUM:
-                                signal_type = 'LARGE_PREMIUM'
-                                
-                            # High vol/OI ratio
-                            elif vol_oi_ratio >= self.MIN_VOL_OI_RATIO and volume >= 500:
-                                signal_type = 'HIGH_VOL_OI'
-                                
-                            # Far OTM with volume
-                            elif otm_pct >= self.MIN_OTM_PCT and volume >= self.MIN_OTM_VOLUME:
-                                signal_type = 'OTM_SWEEP'
-                                
-                            if signal_type:
-                                flow = OptionsFlow(
-                                    ticker=ticker,
-                                    strike=strike,
-                                    expiry=expiry,
-                                    call_put=right,
-                                    premium=premium,
-                                    volume=volume,
-                                    open_interest=open_interest,
-                                    vol_oi_ratio=vol_oi_ratio,
-                                    otm_pct=otm_pct,
-                                    spot_price=spot,
-                                    signal_type=signal_type,
-                                    timestamp=datetime.now()
-                                )
-                                flows.append(flow)
-                                
-                        except Exception as e:
-                            continue
-                            
         except Exception as e:
-            print(f"  Error scanning {ticker}: {e}")
+            pass
             
         return flows
+    
+    def _check_option_row(
+        self, ticker: str, spot: float, expiry: str, right: str, row
+    ) -> Optional[OptionsFlow]:
+        """Check a single option for unusual activity."""
+        try:
+            strike = float(row['strike'])
+            volume = int(row.get('volume', 0) or 0)
+            open_interest = int(row.get('openInterest', 0) or 0)
+            last_price = float(row.get('lastPrice', 0) or 0)
+            
+            if volume < 100 or last_price <= 0:
+                return None
+            
+            # Calculate metrics
+            premium = last_price * volume * 100
+            vol_oi_ratio = volume / open_interest if open_interest > 0 else 0
+            
+            if right == 'C':
+                otm_pct = ((strike - spot) / spot) * 100
+            else:
+                otm_pct = ((spot - strike) / spot) * 100
+            
+            # Check for signals
+            signal_type = None
+            
+            # Large premium (>$50K)
+            if premium >= self.MIN_PREMIUM:
+                signal_type = 'LARGE_PREMIUM'
+            
+            # High vol/OI ratio (new positions opening)
+            elif vol_oi_ratio >= self.MIN_VOL_OI_RATIO and volume >= 500:
+                signal_type = 'HIGH_VOL_OI'
+            
+            # Far OTM with volume (speculative bets)
+            elif otm_pct >= self.MIN_OTM_PCT and volume >= self.MIN_OTM_VOLUME:
+                signal_type = 'OTM_SWEEP'
+            
+            if signal_type:
+                return OptionsFlow(
+                    ticker=ticker,
+                    strike=strike,
+                    expiry=expiry.replace('-', ''),
+                    call_put=right,
+                    premium=premium,
+                    volume=volume,
+                    open_interest=open_interest,
+                    vol_oi_ratio=vol_oi_ratio,
+                    otm_pct=otm_pct,
+                    spot_price=spot,
+                    signal_type=signal_type,
+                    timestamp=datetime.now()
+                )
+        except:
+            pass
+        return None
         
     def scan_all(self, tickers: List[str] = None) -> List[OptionsFlow]:
         """Scan all tickers for unusual activity."""
