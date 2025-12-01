@@ -285,7 +285,19 @@ class BusinessAnalyzer:
             return []
     
     def _get_recent_news(self) -> List[Dict]:
-        """Get recent news headlines."""
+        """
+        Get recent news headlines.
+        
+        Sources (in order of preference):
+        1. Google News RSS (free, reliable)
+        2. yfinance (fallback)
+        """
+        # Try Google News first
+        google_news = self._get_google_news()
+        if google_news:
+            return google_news
+        
+        # Fallback to yfinance
         try:
             news = self.stock.news
             if not news:
@@ -297,9 +309,8 @@ class BusinessAnalyzer:
                 if not title or title == '...':
                     continue
                 
-                # Handle timestamp - skip if invalid (Unix epoch 0)
                 timestamp = n.get('providerPublishTime', 0)
-                if timestamp and timestamp > 946684800:  # After year 2000
+                if timestamp and timestamp > 946684800:
                     date_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
                 else:
                     date_str = 'Recent'
@@ -313,6 +324,63 @@ class BusinessAnalyzer:
             
             return result
         except:
+            return []
+    
+    def _get_google_news(self) -> List[Dict]:
+        """Fetch news from Google News RSS (free, no API key)."""
+        try:
+            import xml.etree.ElementTree as ET
+            from urllib.parse import quote
+            
+            # Get company name for search
+            company_name = self.info.get('shortName', self.ticker)
+            
+            # Google News RSS URL
+            query = quote(f"{company_name} stock")
+            url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+            
+            response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+            
+            if response.status_code != 200:
+                return []
+            
+            # Parse RSS XML
+            root = ET.fromstring(response.content)
+            
+            result = []
+            for item in root.findall('.//item')[:5]:
+                title_elem = item.find('title')
+                pub_date_elem = item.find('pubDate')
+                source_elem = item.find('source')
+                link_elem = item.find('link')
+                
+                title = title_elem.text if title_elem is not None else ''
+                
+                # Parse date (format: "Mon, 25 Nov 2024 12:00:00 GMT")
+                if pub_date_elem is not None and pub_date_elem.text:
+                    try:
+                        from email.utils import parsedate_to_datetime
+                        dt = parsedate_to_datetime(pub_date_elem.text)
+                        date_str = dt.strftime('%Y-%m-%d')
+                    except:
+                        date_str = 'Recent'
+                else:
+                    date_str = 'Recent'
+                
+                source = source_elem.text if source_elem is not None else 'Google News'
+                link = link_elem.text if link_elem is not None else ''
+                
+                if title:
+                    result.append({
+                        'title': title,
+                        'publisher': source,
+                        'date': date_str,
+                        'link': link,
+                    })
+            
+            return result
+            
+        except Exception as e:
             return []
     
     def format_report(self) -> str:
