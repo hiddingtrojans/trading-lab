@@ -297,18 +297,38 @@ class MorningScan:
             return []
             
     def get_regime(self) -> Dict:
-        """Get current market regime."""
+        """Get current market regime - uses premarket data when available."""
         try:
             import yfinance as yf
             
             spy = yf.Ticker('SPY')
             vix = yf.Ticker('^VIX')
             
-            spy_hist = spy.history(period='5d')
+            spy_info = spy.info
             vix_hist = vix.history(period='1d')
             
-            spy_price = spy_hist['Close'].iloc[-1]
-            spy_change = (spy_hist['Close'].iloc[-1] / spy_hist['Close'].iloc[-2] - 1) * 100
+            # Get previous close for comparison
+            prev_close = spy_info.get('previousClose', 0)
+            
+            # Use premarket price if available, otherwise regular market
+            pre_price = spy_info.get('preMarketPrice')
+            reg_price = spy_info.get('regularMarketPrice')
+            
+            if pre_price and prev_close:
+                spy_price = pre_price
+                spy_change = ((pre_price - prev_close) / prev_close) * 100
+                is_premarket = True
+            elif reg_price and prev_close:
+                spy_price = reg_price
+                spy_change = ((reg_price - prev_close) / prev_close) * 100
+                is_premarket = False
+            else:
+                # Fallback to historical
+                spy_hist = spy.history(period='5d')
+                spy_price = spy_hist['Close'].iloc[-1]
+                spy_change = (spy_hist['Close'].iloc[-1] / spy_hist['Close'].iloc[-2] - 1) * 100
+                is_premarket = False
+            
             vix_price = vix_hist['Close'].iloc[-1]
             
             # Simple regime logic
@@ -324,10 +344,11 @@ class MorningScan:
                 'spy_price': round(spy_price, 2),
                 'spy_change': round(spy_change, 2),
                 'vix': round(vix_price, 1),
+                'premarket': is_premarket if 'is_premarket' in dir() else False,
             }
         except Exception as e:
             print(f"  Regime check error: {e}")
-            return {'regime': 'UNKNOWN', 'spy_price': 0, 'spy_change': 0, 'vix': 0}
+            return {'regime': 'UNKNOWN', 'spy_price': 0, 'spy_change': 0, 'vix': 0, 'premarket': False}
             
     def get_sentiment(self, tickers: List[str]) -> Dict[str, Dict]:
         """Get FinBERT sentiment for specific tickers."""
@@ -359,7 +380,8 @@ class MorningScan:
         # Regime
         regime_emoji = {'GREEN': '🟢', 'YELLOW': '🟡', 'RED': '🔴'}.get(regime['regime'], '⚪')
         spy_dir = '+' if regime['spy_change'] >= 0 else ''
-        lines.append(f"{regime_emoji} {regime['regime']} | SPY ${regime['spy_price']} ({spy_dir}{regime['spy_change']}%) | VIX {regime['vix']}")
+        pre_tag = " 🌅" if regime.get('premarket') else ""
+        lines.append(f"{regime_emoji} {regime['regime']} | SPY ${regime['spy_price']} ({spy_dir}{regime['spy_change']}%){pre_tag} | VIX {regime['vix']}")
         
         # Unusual activity
         lines.append("")
