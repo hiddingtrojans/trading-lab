@@ -57,12 +57,12 @@ class MorningScan:
         return self._scan_yfinance_premarket(top_n)
     
     def _scan_yfinance_premarket(self, top_n: int = 3) -> List[Dict]:
-        """Scan premarket movers using yfinance."""
+        """Scan for movers using yfinance."""
         import yfinance as yf
         
         results = []
         
-        # Scan a universe of liquid stocks for premarket activity
+        # Universe of liquid stocks
         universe = [
             # Tech
             'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'INTC', 'CRM',
@@ -79,33 +79,41 @@ class MorningScan:
             # Industrial
             'CAT', 'DE', 'BA', 'RTX', 'LMT', 'GE', 'HON', 'UNP', 'UPS', 'FDX',
             # Consumer
-            'AMZN', 'WMT', 'COST', 'HD', 'LOW', 'TGT', 'NKE', 'SBUX', 'MCD', 'DIS',
+            'WMT', 'COST', 'HD', 'LOW', 'TGT', 'NKE', 'SBUX', 'MCD', 'DIS',
             # Recent movers (small/mid cap)
-            'IONQ', 'RGTI', 'QUBT', 'KULR', 'RKLB', 'LUNR', 'RDW', 'ASTS', 'JOBY',
+            'IONQ', 'RGTI', 'QUBT', 'KULR', 'RKLB', 'LUNR', 'RDW', 'ASTS', 'JOBY', 'HOOD',
         ]
         
-        # Remove duplicates
         universe = list(set(universe))
-        
-        skip_tickers = {'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI'}
+        skip = {'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI'}
         
         for ticker in universe:
-            if ticker in skip_tickers:
+            if ticker in skip:
                 continue
             try:
                 stock = yf.Ticker(ticker)
-                info = stock.info
                 
-                # Get premarket data
+                # Try premarket first
+                info = stock.info
                 pre_price = info.get('preMarketPrice')
                 prev_close = info.get('previousClose', 0)
                 
-                if not pre_price or not prev_close:
-                    continue
+                if pre_price and prev_close:
+                    # Premarket available
+                    change_pct = ((pre_price - prev_close) / prev_close) * 100
+                    price = pre_price
+                    is_premarket = True
+                else:
+                    # Use regular market data
+                    hist = stock.history(period='2d')
+                    if len(hist) < 2:
+                        continue
+                    prev_close = hist['Close'].iloc[-2]
+                    price = hist['Close'].iloc[-1]
+                    change_pct = ((price - prev_close) / prev_close) * 100
+                    is_premarket = False
                 
-                change_pct = ((pre_price - prev_close) / prev_close) * 100
-                
-                # Only include significant movers (>2% in premarket)
+                # Only significant movers (>2%)
                 if abs(change_pct) < 2:
                     continue
                 
@@ -118,16 +126,16 @@ class MorningScan:
                 results.append({
                     'ticker': ticker,
                     'name': name,
-                    'price': pre_price,
+                    'price': price,
                     'change_pct': change_pct,
                     'vol_ratio': vol_ratio,
                     'market_cap_b': market_cap / 1e9 if market_cap else 0,
-                    'premarket': True,
+                    'premarket': is_premarket,
                 })
             except:
                 continue
         
-        # Sort by absolute change (biggest movers)
+        # Sort by absolute change
         results.sort(key=lambda x: abs(x.get('change_pct', 0)), reverse=True)
         return results[:top_n]
     
@@ -357,7 +365,7 @@ class MorningScan:
         lines.append("")
         
         if unusual:
-            lines.append("━━━ 🔥 TOP MOVERS (Full US Scan) ━━━")
+            lines.append("━━━ 🔥 TOP MOVERS ━━━")
             for stock in unusual:
                 ticker = stock['ticker']
                 name = stock.get('name', '')[:20]
@@ -365,13 +373,15 @@ class MorningScan:
                 change = stock.get('change_pct', 0)
                 vol_ratio = stock.get('vol_ratio', 0)
                 mcap = stock.get('market_cap_b', 0)
+                is_pre = stock.get('premarket', False)
                 
-                # Format line with actual useful info
+                # Format
                 change_str = f"+{change:.1f}%" if change >= 0 else f"{change:.1f}%"
                 vol_str = f"{vol_ratio:.1f}x vol" if vol_ratio > 1 else ""
                 mcap_str = f"${mcap:.1f}B" if mcap >= 1 else f"${mcap*1000:.0f}M"
+                pre_tag = " 🌅" if is_pre else ""
                 
-                lines.append(f"• {ticker} {change_str} @ ${price:.2f}")
+                lines.append(f"• {ticker} {change_str} @ ${price:.2f}{pre_tag}")
                 lines.append(f"  {name} | {mcap_str} | {vol_str}")
         elif self.ib and self.ib.isConnected():
             lines.append("━━━ MARKET SCAN ━━━")
