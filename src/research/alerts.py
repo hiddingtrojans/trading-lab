@@ -259,16 +259,145 @@ def send_weekly_digest():
     send_message(alert)
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# DISCOVERY ALERTS - The Real Edge
+# Alert when stocks IMPROVE week-over-week
+# ════════════════════════════════════════════════════════════════════════════
+
+def send_discovery_alerts():
+    """
+    Send alerts for:
+    1. Stocks that improved significantly this week
+    2. New discoveries (stocks meeting criteria for first time)
+    
+    This is THE edge - seeing improvements before the crowd.
+    """
+    from .discovery_db import DiscoveryDatabase
+    
+    db = DiscoveryDatabase()
+    
+    # Get improvements
+    improvements = db.find_improvements(min_score_change=10)
+    new_discoveries = db.get_new_discoveries()
+    
+    if not improvements and not new_discoveries:
+        print("   No improvements or new discoveries to alert")
+        return
+    
+    lines = [
+        "🔬 DISCOVERY ALERT",
+        f"   Week of {datetime.now().strftime('%B %d, %Y')}",
+        "",
+    ]
+    
+    # Improvements section
+    if improvements:
+        lines.append("═══ 📈 STOCKS THAT IMPROVED ═══")
+        lines.append("(Score jumped 10+ points vs last week)")
+        lines.append("")
+        
+        for imp in improvements[:10]:
+            fcf_note = " 🔥" if imp.fcf_turned_positive else ""
+            lines.extend([
+                f"🚀 {imp.ticker}{fcf_note}",
+                f"   {imp.prev_score} → {imp.curr_score} (+{imp.score_change})",
+                f"   {imp.improvement_reason}",
+                "",
+            ])
+        
+        if len(improvements) > 10:
+            lines.append(f"   ... and {len(improvements)-10} more")
+            lines.append("")
+    
+    # New discoveries section
+    if new_discoveries:
+        lines.append("═══ 🆕 NEW DISCOVERIES ═══")
+        lines.append("(Just started meeting criteria)")
+        lines.append("")
+        
+        for disc in new_discoveries[:5]:
+            lines.extend([
+                f"✨ {disc['ticker']} - Score {disc['score']}",
+                "",
+            ])
+        
+        if len(new_discoveries) > 5:
+            lines.append(f"   ... and {len(new_discoveries)-5} more")
+            lines.append("")
+    
+    # FCF flips are HUGE signals
+    fcf_flips = [imp for imp in improvements if imp.fcf_turned_positive]
+    if fcf_flips:
+        lines.append("═══ 🔥 FCF TURNED POSITIVE ═══")
+        lines.append("(Biggest signal - company now profitable)")
+        lines.append("")
+        for imp in fcf_flips:
+            lines.extend([
+                f"💰 {imp.ticker}",
+                f"   Was burning cash, now FCF positive!",
+                "",
+            ])
+    
+    lines.append("─────────────────")
+    lines.append("These improved BEFORE the crowd noticed.")
+    lines.append("python deep_research.py TICKER")
+    
+    alert = "\n".join(lines)
+    print(alert)
+    
+    send_message(alert)
+    return {'improvements': improvements, 'new_discoveries': new_discoveries}
+
+
+def run_weekly_scan_and_alert():
+    """
+    Run weekly comprehensive scan + send alerts.
+    
+    Schedule for Sunday night:
+    0 22 * * 0 cd /path && python -m src.research.alerts --weekly-scan
+    """
+    from .discovery import StockDiscovery
+    
+    print("\n" + "═" * 60)
+    print("📊 WEEKLY DISCOVERY SCAN + ALERTS")
+    print("═" * 60)
+    
+    # Run comprehensive scan
+    engine = StockDiscovery()
+    results = engine.run_weekly_scan(
+        min_market_cap=0.3,
+        max_market_cap=10.0,
+        min_revenue_growth=10.0,
+        min_score=40,
+    )
+    
+    # Send discovery alerts
+    print("\n📤 Sending discovery alerts...")
+    send_discovery_alerts()
+    
+    # Also send weekly digest
+    print("\n📤 Sending weekly digest...")
+    send_weekly_digest()
+    
+    return results
+
+
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='Research alerts and discovery scans')
     parser.add_argument('--weekly', action='store_true', help='Send weekly digest')
-    parser.add_argument('--no-telegram', action='store_true')
+    parser.add_argument('--weekly-scan', action='store_true', help='Run weekly discovery scan + alerts')
+    parser.add_argument('--discovery', action='store_true', help='Send discovery alerts only')
+    parser.add_argument('--no-telegram', action='store_true', help='Suppress Telegram sending')
     
     args = parser.parse_args()
     
-    if args.weekly:
+    if args.weekly_scan:
+        run_weekly_scan_and_alert()
+    elif args.discovery:
+        send_discovery_alerts()
+    elif args.weekly:
         send_weekly_digest()
     else:
         run_research_alerts(send_telegram=not args.no_telegram)

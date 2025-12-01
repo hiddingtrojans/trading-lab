@@ -8,12 +8,15 @@ Your edge: Doing the work others won't.
 Commands:
     python deep_research.py                     # Show your watchlist
     python deep_research.py TICKER              # Full analysis of TICKER
-    python deep_research.py --discover          # Find undiscovered stocks
+    python deep_research.py --discover          # Quick discovery (500 stocks)
+    python deep_research.py --weekly-scan       # Full scan (11,552 stocks) + track improvements
+    python deep_research.py --improvements      # Show stocks that improved this week
     python deep_research.py --add TICKER        # Add to watchlist
     python deep_research.py --thesis TICKER     # Update your thesis
     python deep_research.py --alerts            # Check price alerts
 
 The goal: Find and understand stocks BEFORE the crowd.
+The edge: Track improvements over time, not just snapshots.
 """
 
 import sys
@@ -23,13 +26,14 @@ import argparse
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from research.discovery import StockDiscovery, discover_stocks
+from research.discovery import StockDiscovery, discover_stocks, run_weekly_discovery
 from research.fundamentals import FundamentalAnalyzer, analyze_fundamentals
 from research.business import BusinessAnalyzer, analyze_business
 from research.database import (
     save_research, add_note, get_research, get_watchlist,
     format_watchlist, get_price_alerts
 )
+from research.discovery_db import DiscoveryDatabase
 
 
 def full_analysis(ticker: str):
@@ -226,6 +230,77 @@ def check_price_alerts():
     return triggered
 
 
+def show_improvements():
+    """Show stocks that improved week-over-week."""
+    db = DiscoveryDatabase()
+    
+    improvements = db.find_improvements(min_score_change=10)
+    new_discoveries = db.get_new_discoveries()
+    
+    print("\n" + "═" * 60)
+    print("📈 STOCKS THAT IMPROVED THIS WEEK")
+    print("═" * 60)
+    
+    if not improvements and not new_discoveries:
+        print("\n   No improvements detected.")
+        print("   Run --weekly-scan first to build history.")
+        print("\n" + "═" * 60)
+        return
+    
+    if improvements:
+        print("\n🚀 SCORE IMPROVEMENTS (+10 points or more)")
+        print("─" * 60)
+        for imp in improvements[:15]:
+            fcf = " 🔥 FCF+" if imp.fcf_turned_positive else ""
+            print(f"   {imp.ticker}: {imp.prev_score} → {imp.curr_score} (+{imp.score_change}){fcf}")
+            print(f"      {imp.improvement_reason}")
+            print()
+    
+    if new_discoveries:
+        print("\n✨ NEW DISCOVERIES (just started meeting criteria)")
+        print("─" * 60)
+        for disc in new_discoveries[:10]:
+            print(f"   {disc['ticker']}: Score {disc['score']}")
+    
+    # Show FCF flips prominently
+    fcf_flips = [imp for imp in improvements if imp.fcf_turned_positive]
+    if fcf_flips:
+        print("\n" + "═" * 60)
+        print("🔥 FCF TURNED POSITIVE (biggest signal)")
+        print("═" * 60)
+        for imp in fcf_flips:
+            print(f"   💰 {imp.ticker} - Was burning cash, now profitable!")
+    
+    print("\n" + "═" * 60)
+    print("These improved BEFORE the crowd noticed.")
+    print("python deep_research.py TICKER for full analysis")
+    print("═" * 60)
+
+
+def show_score_trend(ticker: str):
+    """Show a stock's score history over time."""
+    ticker = ticker.upper()
+    db = DiscoveryDatabase()
+    
+    trend = db.get_score_trend(ticker, weeks=8)
+    
+    if not trend:
+        print(f"\n   No history for {ticker}. Run --weekly-scan to build history.")
+        return
+    
+    print(f"\n📊 Score Trend for {ticker}")
+    print("─" * 40)
+    
+    for week, score in trend:
+        bar = "█" * (score // 5)
+        print(f"   {week}: {score:3d} {bar}")
+    
+    if len(trend) >= 2:
+        change = trend[-1][1] - trend[0][1]
+        direction = "📈" if change > 0 else "📉" if change < 0 else "➡️"
+        print(f"\n   {direction} Change over period: {change:+d} points")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Deep Research Platform",
@@ -234,16 +309,32 @@ def main():
     )
     
     parser.add_argument('ticker', nargs='?', help='Stock ticker to analyze')
-    parser.add_argument('--discover', action='store_true', help='Discover undercovered stocks')
+    parser.add_argument('--discover', action='store_true', help='Quick discovery scan (500 stocks)')
+    parser.add_argument('--weekly-scan', action='store_true', help='Full weekly scan (all 11,552 stocks)')
+    parser.add_argument('--improvements', action='store_true', help='Show stocks that improved this week')
+    parser.add_argument('--trend', metavar='TICKER', help='Show score trend for ticker')
     parser.add_argument('--add', metavar='TICKER', help='Add ticker to watchlist')
     parser.add_argument('--thesis', metavar='TICKER', help='Update thesis for ticker')
     parser.add_argument('--alerts', action='store_true', help='Check price alerts')
     parser.add_argument('--note', metavar='TICKER', help='Add note to ticker')
+    parser.add_argument('--max-scan', type=int, default=500, help='Max stocks to scan in quick discover')
     
     args = parser.parse_args()
     
-    if args.discover:
-        discover_stocks()
+    if args.weekly_scan:
+        # Full comprehensive scan
+        results = run_weekly_discovery()
+        # Show improvements after scan
+        if results.get('improvements'):
+            engine = StockDiscovery()
+            print("\n" + engine.format_improvements_report(results['improvements']))
+    elif args.discover:
+        # Quick discovery
+        discover_stocks(max_scan=args.max_scan)
+    elif args.improvements:
+        show_improvements()
+    elif args.trend:
+        show_score_trend(args.trend)
     elif args.add:
         add_to_watchlist(args.add)
     elif args.thesis:
