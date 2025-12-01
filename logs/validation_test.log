@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/Users/raulacedo/Desktop/scanner/scripts/run_1000trade_validation.py", line 18, in <module>
-    from trading.simple_paper_bot import SimplePaperTradingBot, CONFIG
-ModuleNotFoundError: No module named 'trading'

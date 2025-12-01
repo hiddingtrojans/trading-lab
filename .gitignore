@@ -1,14 +1,38 @@
-# Sensitive configs
-configs/telegram.env
-.env
+# Python
 __pycache__/
-*.pyc
-
-# Virtual environments (use any one)
-leaps_env/
+*.py[cod]
+*$py.class
+*.so
+.Python
 venv/
 .venv/
-*.db
-data/output/
-data/watchlists/
-catboost_info/
+env/
+.env
+
+# Data (user-specific)
+data/research.db
+data/discovery.db
+data/ticker_universe.csv
+
+# Config (contains secrets)
+configs/telegram.env
+config/keys.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursorrules
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Cache
+.pytest_cache/
+.cache/
