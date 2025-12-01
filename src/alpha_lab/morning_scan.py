@@ -58,14 +58,12 @@ class MorningScan:
             
             print("  Scanning ENTIRE US market via IBKR...")
             
-            # Scan for unusual volume across ALL US stocks
+            # Scan for most active stocks across ALL US stocks
             scanner = ScannerSubscription(
                 instrument='STK',
                 locationCode='STK.US.MAJOR',  # ALL major US exchanges
-                scanCode='HOT_BY_VOLUME',     # Highest volume rate
-                numberOfRows=top_n * 3,       # Get extra to filter mega-caps
-                abovePrice=5,                 # Min $5
-                marketCapAbove=200000000,     # Min $200M (skip penny stocks)
+                scanCode='MOST_ACTIVE',       # Most active by volume
+                numberOfRows=top_n * 5,       # Get extra to filter mega-caps
             )
             
             scan_data = self.ib.reqScannerData(scanner)
