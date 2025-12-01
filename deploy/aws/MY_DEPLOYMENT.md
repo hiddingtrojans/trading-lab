@@ -15,25 +15,30 @@ ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222
 
 ---
 
-## 🔐 IB Gateway (Docker) - TESTING MONDAY ⏳
+## 🔐 IB Gateway (Docker) - WORKING ✅
 
-IB Gateway runs via Docker with auto-restart.
+IB Gateway runs via Docker with `--net=host` (required for API socket).
+
+**Start IB Gateway:**
+```bash
+ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "sudo docker run -d --name ibgateway \
+  --net=host \
+  -e TRADING_MODE=paper \
+  -e TWS_USERID='racedomilla' \
+  -e TWS_PASSWORD='R@ylCp4U_7X7aAM' \
+  -e TWS_ACCEPT_INCOMING=accept \
+  -e VNC_SERVER_PASSWORD=scanner123 \
+  ghcr.io/gnzsnz/ib-gateway:latest"
+```
 
 **Check status:**
 ```bash
 ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "sudo docker ps"
-ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "sudo docker logs ibgateway --tail 20"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "ss -tlnp | grep 4002"
 ```
 
-**Restart if needed:**
-```bash
-ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "sudo docker restart ibgateway"
-```
-
-**API Ports:**
-- 4001: Live trading
-- 4002: Paper trading (currently active)
-- 5900: VNC (for debugging)
+**API Port:** 4002 (paper trading)
+**VNC Port:** 5900 (for debugging)
 
 ---
 
