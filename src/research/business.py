@@ -22,6 +22,17 @@ import re
 
 
 @dataclass
+class NewsSentiment:
+    """Sentiment analysis of recent news."""
+    overall_sentiment: str  # "Bullish", "Bearish", "Neutral", "Mixed"
+    sentiment_score: int  # -100 to +100
+    summary: str  # One-line summary
+    key_themes: List[str]  # Main topics in news
+    bullish_signals: List[str]
+    bearish_signals: List[str]
+
+
+@dataclass
 class BusinessProfile:
     """Complete business understanding."""
     ticker: str
@@ -55,6 +66,7 @@ class BusinessProfile:
     
     # Recent developments
     recent_news: List[Dict]
+    news_sentiment: Optional[NewsSentiment] = None
 
 
 class BusinessAnalyzer:
@@ -115,6 +127,9 @@ class BusinessAnalyzer:
         # News
         news = self._get_recent_news()
         
+        # Sentiment analysis (uses OpenAI if available)
+        sentiment = self._analyze_news_sentiment(news, name)
+        
         self.profile = BusinessProfile(
             ticker=self.ticker,
             name=name,
@@ -133,6 +148,7 @@ class BusinessAnalyzer:
             ceo=ceo,
             key_executives=executives,
             recent_news=news,
+            news_sentiment=sentiment,
         )
         
         return self.profile
@@ -383,6 +399,132 @@ class BusinessAnalyzer:
         except Exception as e:
             return []
     
+    def _analyze_news_sentiment(self, news: List[Dict], company_name: str) -> Optional[NewsSentiment]:
+        """
+        Analyze sentiment of recent news using OpenAI.
+        
+        Cost: ~$0.01 per analysis
+        """
+        if not news:
+            return None
+        
+        try:
+            from openai import OpenAI
+            
+            # Get API key
+            api_key = os.environ.get('OPENAI_API_KEY')
+            if not api_key:
+                config_path = os.path.join(os.path.dirname(__file__), '../../config/keys.json')
+                if os.path.exists(config_path):
+                    with open(config_path) as f:
+                        config = json.load(f)
+                        api_key = config.get('openai_api_key')
+            
+            if not api_key:
+                return self._simple_sentiment_analysis(news)
+            
+            client = OpenAI(api_key=api_key)
+            
+            # Format news for analysis
+            news_text = "\n".join([
+                f"- {n['title']} ({n['publisher']}, {n['date']})"
+                for n in news[:5]
+            ])
+            
+            prompt = f"""Analyze the sentiment of these recent news headlines about {company_name}:
+
+{news_text}
+
+Respond in this exact JSON format:
+{{
+    "overall_sentiment": "<Bullish|Bearish|Neutral|Mixed>",
+    "sentiment_score": <-100 to +100, where -100 is extremely bearish, +100 is extremely bullish>,
+    "summary": "<One sentence summary of the news sentiment>",
+    "key_themes": ["<theme1>", "<theme2>", "<theme3>"],
+    "bullish_signals": ["<signal1>", "<signal2>"],
+    "bearish_signals": ["<signal1>", "<signal2>"]
+}}
+
+Be objective. If news is mostly neutral/factual, say Neutral. Only say Bullish/Bearish if there's clear positive/negative sentiment.
+JSON only:"""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a financial news sentiment analyzer. Be objective and accurate."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=300,
+            )
+            
+            content = response.choices[0].message.content.strip()
+            
+            # Parse JSON
+            if content.startswith('```'):
+                content = content.split('```')[1]
+                if content.startswith('json'):
+                    content = content[4:]
+            
+            data = json.loads(content)
+            
+            return NewsSentiment(
+                overall_sentiment=data.get('overall_sentiment', 'Neutral'),
+                sentiment_score=data.get('sentiment_score', 0),
+                summary=data.get('summary', ''),
+                key_themes=data.get('key_themes', []),
+                bullish_signals=data.get('bullish_signals', []),
+                bearish_signals=data.get('bearish_signals', []),
+            )
+            
+        except Exception as e:
+            # Fallback to simple analysis
+            return self._simple_sentiment_analysis(news)
+    
+    def _simple_sentiment_analysis(self, news: List[Dict]) -> Optional[NewsSentiment]:
+        """Simple keyword-based sentiment (fallback when no OpenAI)."""
+        if not news:
+            return None
+        
+        bullish_words = ['surge', 'soar', 'jump', 'gain', 'rise', 'up', 'high', 'growth', 
+                         'beat', 'strong', 'bullish', 'buy', 'upgrade', 'outperform', 'positive']
+        bearish_words = ['fall', 'drop', 'plunge', 'decline', 'down', 'low', 'weak', 'miss',
+                         'bearish', 'sell', 'downgrade', 'underperform', 'negative', 'concern', 'risk']
+        
+        bullish_count = 0
+        bearish_count = 0
+        
+        for n in news:
+            title_lower = n.get('title', '').lower()
+            for word in bullish_words:
+                if word in title_lower:
+                    bullish_count += 1
+            for word in bearish_words:
+                if word in title_lower:
+                    bearish_count += 1
+        
+        if bullish_count > bearish_count + 2:
+            sentiment = "Bullish"
+            score = min(50 + (bullish_count - bearish_count) * 10, 80)
+        elif bearish_count > bullish_count + 2:
+            sentiment = "Bearish"
+            score = max(-50 - (bearish_count - bullish_count) * 10, -80)
+        elif bullish_count > 0 and bearish_count > 0:
+            sentiment = "Mixed"
+            score = (bullish_count - bearish_count) * 10
+        else:
+            sentiment = "Neutral"
+            score = 0
+        
+        return NewsSentiment(
+            overall_sentiment=sentiment,
+            sentiment_score=score,
+            summary="Based on keyword analysis of headlines",
+            key_themes=[],
+            bullish_signals=[],
+            bearish_signals=[],
+        )
+    
     def format_report(self) -> str:
         """Format business analysis as report."""
         if not self.profile:
@@ -457,6 +599,40 @@ class BusinessAnalyzer:
                     display_title = title[:60] + "..." if len(title) > 60 else title
                     lines.append(f"  📰 {display_title}")
                     lines.append(f"     {news.get('publisher', '')} | {news.get('date', 'Recent')}")
+        
+        # Sentiment Analysis
+        if p.news_sentiment:
+            s = p.news_sentiment
+            
+            # Emoji based on sentiment
+            if s.overall_sentiment == "Bullish":
+                emoji = "🟢"
+            elif s.overall_sentiment == "Bearish":
+                emoji = "🔴"
+            elif s.overall_sentiment == "Mixed":
+                emoji = "🟡"
+            else:
+                emoji = "⚪"
+            
+            lines.extend([
+                "",
+                "─" * 60,
+                "NEWS SENTIMENT ANALYSIS",
+                "─" * 60,
+                f"  {emoji} Overall: {s.overall_sentiment} ({s.sentiment_score:+d}/100)",
+            ])
+            
+            if s.summary:
+                lines.append(f"  📝 {s.summary}")
+            
+            if s.key_themes:
+                lines.append(f"  🏷️  Themes: {', '.join(s.key_themes[:3])}")
+            
+            if s.bullish_signals:
+                lines.append(f"  📈 Bullish: {', '.join(s.bullish_signals[:2])}")
+            
+            if s.bearish_signals:
+                lines.append(f"  📉 Bearish: {', '.join(s.bearish_signals[:2])}")
         
         lines.extend([
             "",
