@@ -3,14 +3,14 @@
 ## Instance Details
 
 - **Instance ID**: i-080534024ab368273
-- **Public IP**: 3.95.27.222 (changes on restart)
+- **Public IP**: 13.216.2.224 (changes on restart)
 - **Region**: us-east-1
 - **Instance Type**: t3.micro (free tier eligible)
 
 ## SSH Access
 
 ```bash
-ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222
+ssh -i ~/.ssh/scanner-key.pem ubuntu@13.216.2.224
 ```
 
 ---
@@ -21,7 +21,7 @@ IB Gateway runs via Docker with `--net=host` (required for API socket).
 
 **Start IB Gateway:**
 ```bash
-ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "sudo docker run -d --name ibgateway \
+ssh -i ~/.ssh/scanner-key.pem ubuntu@13.216.2.224 "sudo docker run -d --name ibgateway \
   --net=host \
   -e TRADING_MODE=paper \
   -e TWS_USERID='racedomilla' \
@@ -33,8 +33,8 @@ ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "sudo docker run -d --name ibga
 
 **Check status:**
 ```bash
-ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "sudo docker ps"
-ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "ss -tlnp | grep 4002"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@13.216.2.224 "sudo docker ps"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@13.216.2.224 "ss -tlnp | grep 4002"
 ```
 
 **API Port:** 4002 (paper trading)
@@ -67,8 +67,8 @@ This is what Unusual Whales charges $40/mo for.
 
 ```bash
 # View logs
-ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "tail -50 ~/scanner/logs/morning.log"
-ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222 "tail -50 ~/scanner/logs/options_flow.log"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@13.216.2.224 "tail -50 ~/scanner/logs/morning.log"
+ssh -i ~/.ssh/scanner-key.pem ubuntu@13.216.2.224 "tail -50 ~/scanner/logs/options_flow.log"
 ```
 
 ## Management Commands
@@ -95,7 +95,7 @@ aws ec2 describe-instances --instance-ids i-080534024ab368273 --profile personal
 
 ```bash
 # SSH in and run
-ssh -i ~/.ssh/scanner-key.pem ubuntu@3.95.27.222
+ssh -i ~/.ssh/scanner-key.pem ubuntu@13.216.2.224
 cd ~/scanner && source venv/bin/activate
 source configs/telegram.env
 

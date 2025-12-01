@@ -290,9 +290,12 @@ class MorningScan:
                 
                 lines.append(f"• {ticker} {change_str} @ ${price:.2f}")
                 lines.append(f"  {name} | {mcap_str} | {vol_str}")
+        elif self.ib and self.ib.isConnected():
+            lines.append("━━━ MARKET SCAN ━━━")
+            lines.append("📴 Market closed - no movers")
         else:
             lines.append("━━━ MARKET SCAN ━━━")
-            lines.append("📡 IBKR offline - limited to SEC data")
+            lines.append("📡 IBKR offline - run during market hours")
             
         # Insider trades
         lines.append("")
