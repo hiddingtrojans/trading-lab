@@ -43,6 +43,11 @@ from research.insider_tracker import InsiderTracker, check_insider
 from research.institutional_tracker import InstitutionalTracker, check_institutions
 from research.short_interest_tracker import ShortInterestTracker, check_short_interest
 from research.valuation import StockValuation, analyze_valuation
+from research.earnings_tracker import EarningsTracker, check_earnings
+from research.buyback_dividend import BuybackDividendTracker, check_buyback_dividend
+from research.options_analysis import OptionsAnalyzer, check_options
+from research.technical_analysis import TechnicalAnalyzer, check_technicals
+from research.competitors import CompetitorAnalyzer, compare_competitors
 
 
 def full_analysis(ticker: str):
@@ -349,6 +354,16 @@ def main():
                         help='Check short interest and squeeze potential')
     parser.add_argument('--valuation', metavar='TICKER', 
                         help='Calculate fair value vs current price')
+    parser.add_argument('--earnings', metavar='TICKER', 
+                        help='Check earnings history and next date')
+    parser.add_argument('--dividends', metavar='TICKER', 
+                        help='Check dividends and buyback activity')
+    parser.add_argument('--options', metavar='TICKER', 
+                        help='Check IV percentile and LEAPS timing')
+    parser.add_argument('--technicals', metavar='TICKER', 
+                        help='Technical analysis (RS, S/R, seasonality)')
+    parser.add_argument('--peers', metavar='TICKER', 
+                        help='Compare to industry peers')
     parser.add_argument('--max-scan', type=int, default=500, help='Max stocks to scan in quick discover')
     
     args = parser.parse_args()
@@ -411,6 +426,21 @@ def main():
     elif args.valuation:
         # Calculate fair value
         analyze_valuation(args.valuation)
+    elif args.earnings:
+        # Check earnings history
+        check_earnings(args.earnings)
+    elif args.dividends:
+        # Check dividends and buybacks
+        check_buyback_dividend(args.dividends)
+    elif args.options:
+        # Check IV percentile and LEAPS timing
+        check_options(args.options)
+    elif args.technicals:
+        # Technical analysis
+        check_technicals(args.technicals)
+    elif args.peers:
+        # Peer comparison
+        compare_competitors(args.peers)
     elif args.ticker:
         full_analysis(args.ticker)
     else:
