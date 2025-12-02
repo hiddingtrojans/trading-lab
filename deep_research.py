@@ -15,6 +15,7 @@ Commands:
     python deep_research.py --insiders          # Scan watchlist for insider buying
     python deep_research.py --institutions TICKER # Check 13F institutional holdings
     python deep_research.py --shorts TICKER     # Check short interest & squeeze risk
+    python deep_research.py --valuation TICKER  # Calculate fair value vs current price
     python deep_research.py --add TICKER        # Add to watchlist
     python deep_research.py --thesis TICKER     # Update your thesis
     python deep_research.py --alerts            # Check price alerts
@@ -41,6 +42,7 @@ from research.discovery_db import DiscoveryDatabase
 from research.insider_tracker import InsiderTracker, check_insider
 from research.institutional_tracker import InstitutionalTracker, check_institutions
 from research.short_interest_tracker import ShortInterestTracker, check_short_interest
+from research.valuation import StockValuation, analyze_valuation
 
 
 def full_analysis(ticker: str):
@@ -72,8 +74,14 @@ def full_analysis(ticker: str):
     else:
         print("   No recent insider transactions found")
     
-    # 4. Technical Context (simple)
-    print("\n📍 Step 4: Price Context...")
+    # 4. Valuation Analysis
+    print("\n📍 Step 4: Valuation (Fair Value)...")
+    valuation = StockValuation(ticker)
+    val_summary = valuation.analyze()
+    print(valuation.format_report(val_summary))
+    
+    # 5. Technical Context (simple)
+    print("\n📍 Step 5: Price Context...")
     import yfinance as yf
     stock = yf.Ticker(ticker)
     hist = stock.history(period='1y')
@@ -339,6 +347,8 @@ def main():
                         help='Check institutional 13F holdings')
     parser.add_argument('--shorts', metavar='TICKER', 
                         help='Check short interest and squeeze potential')
+    parser.add_argument('--valuation', metavar='TICKER', 
+                        help='Calculate fair value vs current price')
     parser.add_argument('--max-scan', type=int, default=500, help='Max stocks to scan in quick discover')
     
     args = parser.parse_args()
@@ -398,6 +408,9 @@ def main():
     elif args.shorts:
         # Check short interest
         check_short_interest(args.shorts)
+    elif args.valuation:
+        # Calculate fair value
+        analyze_valuation(args.valuation)
     elif args.ticker:
         full_analysis(args.ticker)
     else:

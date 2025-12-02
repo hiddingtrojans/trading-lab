@@ -120,6 +120,7 @@ Aprobados → 5 oportunidades reales
 | `python deep_research.py --insiders` | Escanear watchlist para compras de insiders |
 | `python deep_research.py --institutions TICKER` | Ver holdings institucionales (13F) |
 | `python deep_research.py --shorts TICKER` | Ver interés corto y riesgo de squeeze |
+| `python deep_research.py --valuation TICKER` | Calcular valor justo vs precio actual |
 | `python deep_research.py --add TICKER` | Añadir al watchlist |
 | `python deep_research.py --thesis TICKER` | Establecer tu tesis y objetivos |
 | `python deep_research.py --alerts` | Verificar alertas de precio |
