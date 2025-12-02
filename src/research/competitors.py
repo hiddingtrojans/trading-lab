@@ -102,8 +102,93 @@ class CompetitorAnalyzer:
     Compare a stock to its peers.
     """
     
+    # Industry to ticker mapping for auto peer discovery
+    INDUSTRY_PEERS = {
+        'Software - Application': ['CRM', 'NOW', 'WDAY', 'ADBE', 'INTU', 'TEAM', 'ZM', 'DDOG'],
+        'Software - Infrastructure': ['MSFT', 'ORCL', 'CRM', 'NOW', 'SNOW', 'MDB', 'NET'],
+        'Semiconductors': ['NVDA', 'AMD', 'INTC', 'QCOM', 'AVGO', 'TXN', 'MU', 'AMAT'],
+        'Internet Content & Information': ['GOOGL', 'META', 'SNAP', 'PINS', 'TWTR'],
+        'Internet Retail': ['AMZN', 'EBAY', 'ETSY', 'SHOP', 'MELI', 'SE'],
+        'Consumer Electronics': ['AAPL', 'SONY', 'HPQ', 'DELL'],
+        'Auto Manufacturers': ['TSLA', 'GM', 'F', 'RIVN', 'LCID', 'TM', 'HMC'],
+        'Banks - Diversified': ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS'],
+        'Banks - Regional': ['USB', 'PNC', 'TFC', 'FITB', 'KEY'],
+        'Credit Services': ['V', 'MA', 'AXP', 'DFS', 'COF', 'SYF'],
+        'Financial Data & Stock Exchanges': ['SPGI', 'MSCI', 'ICE', 'CME', 'NDAQ'],
+        'Asset Management': ['BLK', 'BX', 'KKR', 'APO', 'ARES'],
+        'Insurance - Diversified': ['BRK-B', 'AIG', 'MET', 'PRU', 'AFL'],
+        'Drug Manufacturers': ['JNJ', 'PFE', 'MRK', 'ABBV', 'LLY', 'BMY'],
+        'Biotechnology': ['AMGN', 'GILD', 'BIIB', 'REGN', 'VRTX', 'MRNA'],
+        'Medical Devices': ['MDT', 'ABT', 'SYK', 'BSX', 'ISRG', 'EW'],
+        'Healthcare Plans': ['UNH', 'CVS', 'CI', 'ELV', 'HUM', 'CNC'],
+        'Retail - Defensive': ['WMT', 'COST', 'TGT', 'DG', 'DLTR', 'KR'],
+        'Restaurants': ['MCD', 'SBUX', 'CMG', 'YUM', 'DRI', 'QSR'],
+        'Entertainment': ['DIS', 'NFLX', 'WBD', 'PARA', 'CMCSA', 'LYV'],
+        'Aerospace & Defense': ['BA', 'LMT', 'RTX', 'NOC', 'GD', 'GE'],
+        'Oil & Gas Integrated': ['XOM', 'CVX', 'COP', 'EOG', 'SLB', 'OXY'],
+        'Utilities - Regulated Electric': ['NEE', 'DUK', 'SO', 'D', 'AEP', 'XEL'],
+        'REIT - Diversified': ['AMT', 'PLD', 'EQIX', 'PSA', 'SPG', 'O'],
+        'Telecom Services': ['T', 'VZ', 'TMUS', 'CMCSA', 'CHTR'],
+        'Information Technology Services': ['ACN', 'IBM', 'CTSH', 'INFY', 'WIT'],
+        'Specialty Retail': ['HD', 'LOW', 'TJX', 'ROST', 'BBY', 'ULTA'],
+        'Packaged Foods': ['PEP', 'KO', 'MDLZ', 'GIS', 'K', 'KHC'],
+        'Household Products': ['PG', 'CL', 'KMB', 'CHD', 'CLX'],
+        # Fintech / Payment processing
+        'Software - Financial': ['SQ', 'PYPL', 'AFRM', 'SOFI', 'UPST'],
+        # Latin America focused
+        'Financial - Payment Processing': ['DLO', 'STNE', 'PAGS', 'NU', 'MELI'],
+    }
+    
     def __init__(self, ticker: str):
         self.ticker = ticker.upper()
+    
+    def _find_peers_by_industry(self) -> List[str]:
+        """Auto-find peers by industry."""
+        try:
+            stock = yf.Ticker(self.ticker)
+            info = stock.info
+            industry = info.get('industry', '')
+            
+            if not industry:
+                return []
+            
+            # Check if we have peers for this industry
+            if industry in self.INDUSTRY_PEERS:
+                peers = [p for p in self.INDUSTRY_PEERS[industry] if p != self.ticker]
+                return peers[:4]  # Max 4 peers
+            
+            # Try partial match
+            for ind_name, peers in self.INDUSTRY_PEERS.items():
+                if ind_name.lower() in industry.lower() or industry.lower() in ind_name.lower():
+                    peers = [p for p in peers if p != self.ticker]
+                    return peers[:4]
+            
+            # Still no match - try to find similar stocks by sector
+            sector = info.get('sector', '')
+            similar = []
+            
+            # Generic fallback by sector
+            sector_fallback = {
+                'Technology': ['AAPL', 'MSFT', 'GOOGL', 'META'],
+                'Financial Services': ['JPM', 'V', 'MA', 'GS'],
+                'Healthcare': ['JNJ', 'UNH', 'PFE', 'ABBV'],
+                'Consumer Cyclical': ['AMZN', 'TSLA', 'HD', 'NKE'],
+                'Consumer Defensive': ['PG', 'KO', 'PEP', 'WMT'],
+                'Energy': ['XOM', 'CVX', 'COP', 'SLB'],
+                'Industrials': ['CAT', 'HON', 'UPS', 'BA'],
+                'Communication Services': ['GOOGL', 'META', 'DIS', 'NFLX'],
+                'Utilities': ['NEE', 'DUK', 'SO', 'D'],
+                'Real Estate': ['AMT', 'PLD', 'EQIX', 'PSA'],
+                'Basic Materials': ['LIN', 'APD', 'SHW', 'ECL'],
+            }
+            
+            if sector in sector_fallback:
+                similar = [p for p in sector_fallback[sector] if p != self.ticker]
+            
+            return similar[:4]
+            
+        except Exception as e:
+            return []
     
     def analyze(self) -> ComparisonResult:
         """Run peer comparison analysis."""
@@ -112,13 +197,8 @@ class CompetitorAnalyzer:
         peers_list = PEER_GROUPS.get(self.ticker, [])
         
         if not peers_list:
-            # Try to get from yfinance industry
-            try:
-                stock = yf.Ticker(self.ticker)
-                industry = stock.info.get('industry', '')
-                # Could expand here to find peers by industry
-            except:
-                pass
+            # Auto-find peers by industry
+            peers_list = self._find_peers_by_industry()
         
         # Get target metrics
         target = self._get_metrics(self.ticker)
