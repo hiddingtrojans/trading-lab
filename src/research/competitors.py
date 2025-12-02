@@ -7,71 +7,22 @@ Why this matters:
 - Numbers without context are meaningless
 - "Expensive" vs peers? Or just "expensive"?
 - Identify best-in-class vs laggards
+
+Auto-discovers peers based on:
+- Business model (from description keywords)
+- Market cap range (similar-sized companies)
+- Sector/Industry
+- Geographic focus (if applicable)
 """
 
 import os
 import sys
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Set
 from dataclasses import dataclass
 import yfinance as yf
+import re
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-
-
-# Manually curated peer groups for common stocks
-PEER_GROUPS = {
-    # Tech Giants
-    'AAPL': ['MSFT', 'GOOGL', 'AMZN', 'META'],
-    'MSFT': ['AAPL', 'GOOGL', 'AMZN', 'META'],
-    'GOOGL': ['AAPL', 'MSFT', 'META', 'AMZN'],
-    'GOOG': ['AAPL', 'MSFT', 'META', 'AMZN'],
-    'META': ['GOOGL', 'SNAP', 'PINS', 'TWTR'],
-    'AMZN': ['WMT', 'TGT', 'COST', 'EBAY'],
-    
-    # Semiconductors
-    'NVDA': ['AMD', 'INTC', 'AVGO', 'QCOM'],
-    'AMD': ['NVDA', 'INTC', 'QCOM', 'MU'],
-    'INTC': ['AMD', 'NVDA', 'QCOM', 'TXN'],
-    
-    # EV/Auto
-    'TSLA': ['GM', 'F', 'RIVN', 'LCID'],
-    'RIVN': ['TSLA', 'LCID', 'GM', 'F'],
-    
-    # Streaming
-    'NFLX': ['DIS', 'WBD', 'PARA', 'CMCSA'],
-    'DIS': ['NFLX', 'WBD', 'CMCSA', 'PARA'],
-    
-    # Fintech/Payments
-    'V': ['MA', 'PYPL', 'SQ', 'AXP'],
-    'MA': ['V', 'PYPL', 'SQ', 'AXP'],
-    'PYPL': ['V', 'MA', 'SQ', 'AFRM'],
-    'SQ': ['PYPL', 'V', 'MA', 'AFRM'],
-    
-    # Latin America Fintech/Payments
-    'DLO': ['STNE', 'PAGS', 'NU', 'PYPL'],  # DLocal - payment processing
-    'STNE': ['DLO', 'PAGS', 'NU', 'PYPL'],  # StoneCo
-    'PAGS': ['DLO', 'STNE', 'NU', 'PYPL'],  # PagSeguro
-    'NU': ['DLO', 'STNE', 'PAGS', 'SOFI'],  # Nu Holdings
-    
-    # Cloud/SaaS
-    'CRM': ['NOW', 'WDAY', 'ORCL', 'SAP'],
-    'NOW': ['CRM', 'WDAY', 'SNOW', 'DDOG'],
-    
-    # Banks
-    'JPM': ['BAC', 'C', 'WFC', 'GS'],
-    'BAC': ['JPM', 'C', 'WFC', 'MS'],
-    
-    # Retail
-    'WMT': ['TGT', 'COST', 'AMZN', 'HD'],
-    'TGT': ['WMT', 'COST', 'KR', 'DG'],
-    
-    # Airlines
-    'DAL': ['UAL', 'AAL', 'LUV', 'JBLU'],
-    
-    # Healthcare
-    'UNH': ['CVS', 'CI', 'ELV', 'HUM'],
-    'JNJ': ['PFE', 'MRK', 'ABBV', 'LLY'],
-}
 
 
 @dataclass
@@ -105,116 +56,170 @@ class ComparisonResult:
 
 class CompetitorAnalyzer:
     """
-    Compare a stock to its peers.
+    Compare a stock to its peers using intelligent auto-discovery.
+    
+    No hardcoded lists - finds peers dynamically based on:
+    1. Business model keywords (from description)
+    2. Market cap range (similar-sized companies)
+    3. Sector/Industry match
+    4. Geographic focus (if applicable)
     """
     
-    # Industry to ticker mapping for auto peer discovery
-    INDUSTRY_PEERS = {
-        'Software - Application': ['CRM', 'NOW', 'WDAY', 'ADBE', 'INTU', 'TEAM', 'ZM', 'DDOG'],
-        'Software - Infrastructure': ['MSFT', 'ORCL', 'CRM', 'NOW', 'SNOW', 'MDB', 'NET'],
-        'Semiconductors': ['NVDA', 'AMD', 'INTC', 'QCOM', 'AVGO', 'TXN', 'MU', 'AMAT'],
-        'Internet Content & Information': ['GOOGL', 'META', 'SNAP', 'PINS', 'TWTR'],
-        'Internet Retail': ['AMZN', 'EBAY', 'ETSY', 'SHOP', 'MELI', 'SE'],
-        'Consumer Electronics': ['AAPL', 'SONY', 'HPQ', 'DELL'],
-        'Auto Manufacturers': ['TSLA', 'GM', 'F', 'RIVN', 'LCID', 'TM', 'HMC'],
-        'Banks - Diversified': ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS'],
-        'Banks - Regional': ['USB', 'PNC', 'TFC', 'FITB', 'KEY'],
-        'Credit Services': ['V', 'MA', 'AXP', 'DFS', 'COF', 'SYF'],
-        'Financial Data & Stock Exchanges': ['SPGI', 'MSCI', 'ICE', 'CME', 'NDAQ'],
-        'Asset Management': ['BLK', 'BX', 'KKR', 'APO', 'ARES'],
-        'Insurance - Diversified': ['BRK-B', 'AIG', 'MET', 'PRU', 'AFL'],
-        'Drug Manufacturers': ['JNJ', 'PFE', 'MRK', 'ABBV', 'LLY', 'BMY'],
-        'Biotechnology': ['AMGN', 'GILD', 'BIIB', 'REGN', 'VRTX', 'MRNA'],
-        'Medical Devices': ['MDT', 'ABT', 'SYK', 'BSX', 'ISRG', 'EW'],
-        'Healthcare Plans': ['UNH', 'CVS', 'CI', 'ELV', 'HUM', 'CNC'],
-        'Retail - Defensive': ['WMT', 'COST', 'TGT', 'DG', 'DLTR', 'KR'],
-        'Restaurants': ['MCD', 'SBUX', 'CMG', 'YUM', 'DRI', 'QSR'],
-        'Entertainment': ['DIS', 'NFLX', 'WBD', 'PARA', 'CMCSA', 'LYV'],
-        'Aerospace & Defense': ['BA', 'LMT', 'RTX', 'NOC', 'GD', 'GE'],
-        'Oil & Gas Integrated': ['XOM', 'CVX', 'COP', 'EOG', 'SLB', 'OXY'],
-        'Utilities - Regulated Electric': ['NEE', 'DUK', 'SO', 'D', 'AEP', 'XEL'],
-        'REIT - Diversified': ['AMT', 'PLD', 'EQIX', 'PSA', 'SPG', 'O'],
-        'Telecom Services': ['T', 'VZ', 'TMUS', 'CMCSA', 'CHTR'],
-        'Information Technology Services': ['ACN', 'IBM', 'CTSH', 'INFY', 'WIT'],
-        'Specialty Retail': ['HD', 'LOW', 'TJX', 'ROST', 'BBY', 'ULTA'],
-        'Packaged Foods': ['PEP', 'KO', 'MDLZ', 'GIS', 'K', 'KHC'],
-        'Household Products': ['PG', 'CL', 'KMB', 'CHD', 'CLX'],
-        # Fintech / Payment processing
-        'Software - Financial': ['SQ', 'PYPL', 'AFRM', 'SOFI', 'UPST'],
-        # Latin America focused
-        'Financial - Payment Processing': ['DLO', 'STNE', 'PAGS', 'NU', 'MELI'],
+    # Business model keyword patterns
+    BUSINESS_MODELS = {
+        'payment_processing': ['payment', 'transaction processing', 'payment gateway', 'merchant', 
+                              'payment solution', 'fintech', 'payment platform', 'checkout'],
+        'saas': ['software as a service', 'saas', 'cloud software', 'subscription software', 
+                'enterprise software', 'software platform'],
+        'ecommerce': ['e-commerce', 'online retail', 'marketplace', 'online store', 'digital commerce'],
+        'banking': ['bank', 'banking', 'financial services', 'digital bank', 'neobank'],
+        'streaming': ['streaming', 'video streaming', 'content streaming', 'entertainment platform'],
+        'semiconductor': ['semiconductor', 'chip', 'processor', 'integrated circuit'],
+        'retail': ['retail', 'retailer', 'store', 'shopping'],
+        'cloud_infrastructure': ['cloud infrastructure', 'cloud computing', 'data center', 'cloud platform'],
+    }
+    
+    # Common stocks by sector for peer search (curated list for efficiency)
+    SECTOR_UNIVERSE = {
+        'Technology': ['AAPL', 'MSFT', 'GOOGL', 'META', 'NVDA', 'AMD', 'INTC', 'CRM', 'NOW', 
+                      'ORCL', 'ADBE', 'INTU', 'SNOW', 'DDOG', 'NET', 'MDB', 'ZM', 'TEAM'],
+        'Financial Services': ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS', 'V', 'MA', 'PYPL', 'SQ', 
+                              'AXP', 'COF', 'DFS', 'STNE', 'PAGS', 'NU', 'DLO', 'SOFI', 'AFRM'],
+        'Healthcare': ['JNJ', 'UNH', 'PFE', 'ABBV', 'LLY', 'MRK', 'BMY', 'AMGN', 'GILD', 
+                      'REGN', 'VRTX', 'CVS', 'CI', 'HUM'],
+        'Consumer Cyclical': ['AMZN', 'TSLA', 'HD', 'NKE', 'SBUX', 'MCD', 'NFLX', 'DIS'],
+        'Consumer Defensive': ['WMT', 'COST', 'TGT', 'PG', 'KO', 'PEP'],
+        'Energy': ['XOM', 'CVX', 'COP', 'SLB', 'EOG'],
+        'Industrials': ['CAT', 'HON', 'UPS', 'BA', 'GE'],
+        'Communication Services': ['GOOGL', 'META', 'DIS', 'NFLX', 'T', 'VZ'],
+        'Utilities': ['NEE', 'DUK', 'SO', 'D'],
+        'Real Estate': ['AMT', 'PLD', 'EQIX', 'PSA'],
     }
     
     def __init__(self, ticker: str):
         self.ticker = ticker.upper()
+        self.stock = yf.Ticker(self.ticker)
+        self.info = self.stock.info
     
-    def _find_peers_by_industry(self) -> List[str]:
-        """Auto-find peers by industry."""
+    def _extract_business_model(self, description: str) -> Set[str]:
+        """Extract business model keywords from description."""
+        description_lower = description.lower()
+        models = set()
+        
+        for model, keywords in self.BUSINESS_MODELS.items():
+            for keyword in keywords:
+                if keyword in description_lower:
+                    models.add(model)
+                    break
+        
+        return models
+    
+    def _get_market_cap_range(self, market_cap: float) -> tuple:
+        """Get market cap range for peer search (within 10x-0.1x)."""
+        if market_cap < 1e9:  # < $1B
+            return (0, 10e9)
+        elif market_cap < 10e9:  # $1B-$10B
+            return (0.5e9, 50e9)
+        elif market_cap < 100e9:  # $10B-$100B
+            return (5e9, 500e9)
+        else:  # > $100B
+            return (50e9, float('inf'))
+    
+    def _score_peer_match(self, peer_ticker: str, target_models: Set[str], 
+                         target_mcap: float, target_sector: str, target_desc: str) -> float:
+        """Score how well a peer matches (0-100)."""
         try:
-            stock = yf.Ticker(self.ticker)
-            info = stock.info
-            industry = info.get('industry', '')
-            business_summary = info.get('longBusinessSummary', '').lower()
+            peer_stock = yf.Ticker(peer_ticker)
+            peer_info = peer_stock.info
             
-            if not industry:
+            # Skip if no market cap
+            peer_mcap = peer_info.get('marketCap', 0)
+            if not peer_mcap or peer_mcap < 100e6:  # Skip micro-caps
+                return 0
+            
+            score = 0
+            peer_desc = peer_info.get('longBusinessSummary', '').lower()
+            peer_models = self._extract_business_model(peer_desc)
+            
+            # 1. Business model match (50 points) - MOST IMPORTANT
+            if target_models and peer_models:
+                overlap = len(target_models & peer_models)
+                if overlap > 0:
+                    score += 50  # Strong match
+                elif target_models:  # Check for keyword overlap in descriptions
+                    # Count shared keywords
+                    target_words = set(re.findall(r'\b\w{4,}\b', target_desc.lower()))
+                    peer_words = set(re.findall(r'\b\w{4,}\b', peer_desc))
+                    shared = len(target_words & peer_words)
+                    if shared > 5:  # Significant keyword overlap
+                        score += 30
+            
+            # 2. Sector match (30 points) - less important than business model
+            peer_sector = peer_info.get('sector', '')
+            if peer_sector == target_sector:
+                score += 30
+            elif peer_sector:  # Partial credit for related sectors
+                score += 5
+            
+            # 3. Market cap similarity (20 points)
+            if target_mcap > 0:
+                ratio = min(peer_mcap, target_mcap) / max(peer_mcap, target_mcap)
+                score += ratio * 20  # Closer market cap = higher score
+            
+            return score
+            
+        except Exception:
+            return 0
+    
+    def _find_peers_dynamically(self) -> List[str]:
+        """Dynamically discover peers based on business model, market cap, and sector."""
+        try:
+            info = self.info
+            sector = info.get('sector', '')
+            industry = info.get('industry', '')
+            description = info.get('longBusinessSummary', '')
+            market_cap = info.get('marketCap', 0)
+            
+            if not sector or not market_cap:
                 return []
             
-            # Check if we have peers for this industry (exact match)
-            if industry in self.INDUSTRY_PEERS:
-                peers = [p for p in self.INDUSTRY_PEERS[industry] if p != self.ticker]
-                if peers:
-                    return peers[:4]  # Max 4 peers
+            # Extract business model
+            business_models = self._extract_business_model(description)
             
-            # Try partial match with keywords (more specific)
-            industry_lower = industry.lower()
+            # Get candidate universe from sector
+            candidates = list(self.SECTOR_UNIVERSE.get(sector, []))
             
-            # Payment/Fintech keywords
-            payment_keywords = ['payment', 'fintech', 'financial technology', 'transaction', 'processing']
-            if any(kw in industry_lower or kw in business_summary for kw in payment_keywords):
-                # Check for payment-specific industries first
-                for ind_name, peers in self.INDUSTRY_PEERS.items():
-                    if 'payment' in ind_name.lower() or 'financial' in ind_name.lower():
-                        peers = [p for p in peers if p != self.ticker]
-                        if peers:
-                            return peers[:4]
-                # Fallback to general payment processors
-                return ['PYPL', 'SQ', 'STNE', 'PAGS'][:4]
+            # If payment processing, also check Financial Services
+            if 'payment_processing' in business_models:
+                candidates.extend(self.SECTOR_UNIVERSE.get('Financial Services', []))
+                candidates = list(set(candidates))  # Remove duplicates
             
-            # Software keywords - be more specific
-            software_keywords = ['software', 'saas', 'application', 'platform']
-            if any(kw in industry_lower for kw in software_keywords):
-                for ind_name, peers in self.INDUSTRY_PEERS.items():
-                    if 'software' in ind_name.lower():
-                        # Only match if it's clearly software, not payment software
-                        if 'payment' not in industry_lower and 'financial' not in industry_lower:
-                            peers = [p for p in peers if p != self.ticker]
-                            if peers:
-                                return peers[:4]
+            # If no candidates from sector, try related
+            if not candidates:
+                if 'Technology' in sector or 'Software' in sector:
+                    candidates = self.SECTOR_UNIVERSE.get('Technology', [])
+                elif 'Financial' in sector:
+                    candidates = self.SECTOR_UNIVERSE.get('Financial Services', [])
             
-            # Try partial match (less aggressive)
-            for ind_name, peers in self.INDUSTRY_PEERS.items():
-                # More strict matching - require significant overlap
-                ind_words = set(ind_name.lower().split())
-                industry_words = set(industry_lower.split())
-                if len(ind_words & industry_words) >= 2:  # At least 2 words match
-                    peers = [p for p in peers if p != self.ticker]
-                    if peers:
-                        return peers[:4]
+            if not candidates:
+                return []
             
-            # Last resort: sector fallback (but only if no better match)
-            sector = info.get('sector', '')
-            similar = []
+            # Score all candidates
+            scored_peers = []
+            for candidate in candidates:
+                if candidate == self.ticker:
+                    continue
+                
+                score = self._score_peer_match(
+                    candidate, business_models, market_cap, sector, description
+                )
+                
+                if score > 25:  # Minimum threshold (raised for better quality)
+                    scored_peers.append((score, candidate))
             
-            # More specific sector fallbacks
-            sector_fallback = {
-                'Financial Services': ['V', 'MA', 'PYPL', 'SQ'],  # Fintech focus
-                'Technology': ['AAPL', 'MSFT', 'GOOGL', 'META'],  # Only if clearly tech
-            }
-            
-            if sector in sector_fallback:
-                similar = [p for p in sector_fallback[sector] if p != self.ticker]
-            
-            return similar[:4] if similar else []
+            # Sort by score and return top 4
+            scored_peers.sort(reverse=True, key=lambda x: x[0])
+            return [ticker for _, ticker in scored_peers[:4]]
             
         except Exception as e:
             return []
@@ -222,12 +227,8 @@ class CompetitorAnalyzer:
     def analyze(self) -> ComparisonResult:
         """Run peer comparison analysis."""
         
-        # Get peers
-        peers_list = PEER_GROUPS.get(self.ticker, [])
-        
-        if not peers_list:
-            # Auto-find peers by industry
-            peers_list = self._find_peers_by_industry()
+        # Dynamically discover peers
+        peers_list = self._find_peers_dynamically()
         
         # Get target metrics
         target = self._get_metrics(self.ticker)
