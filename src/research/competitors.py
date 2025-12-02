@@ -47,6 +47,12 @@ PEER_GROUPS = {
     'PYPL': ['V', 'MA', 'SQ', 'AFRM'],
     'SQ': ['PYPL', 'V', 'MA', 'AFRM'],
     
+    # Latin America Fintech/Payments
+    'DLO': ['STNE', 'PAGS', 'NU', 'PYPL'],  # DLocal - payment processing
+    'STNE': ['DLO', 'PAGS', 'NU', 'PYPL'],  # StoneCo
+    'PAGS': ['DLO', 'STNE', 'NU', 'PYPL'],  # PagSeguro
+    'NU': ['DLO', 'STNE', 'PAGS', 'SOFI'],  # Nu Holdings
+    
     # Cloud/SaaS
     'CRM': ['NOW', 'WDAY', 'ORCL', 'SAP'],
     'NOW': ['CRM', 'WDAY', 'SNOW', 'DDOG'],
@@ -148,44 +154,67 @@ class CompetitorAnalyzer:
             stock = yf.Ticker(self.ticker)
             info = stock.info
             industry = info.get('industry', '')
+            business_summary = info.get('longBusinessSummary', '').lower()
             
             if not industry:
                 return []
             
-            # Check if we have peers for this industry
+            # Check if we have peers for this industry (exact match)
             if industry in self.INDUSTRY_PEERS:
                 peers = [p for p in self.INDUSTRY_PEERS[industry] if p != self.ticker]
-                return peers[:4]  # Max 4 peers
+                if peers:
+                    return peers[:4]  # Max 4 peers
             
-            # Try partial match
+            # Try partial match with keywords (more specific)
+            industry_lower = industry.lower()
+            
+            # Payment/Fintech keywords
+            payment_keywords = ['payment', 'fintech', 'financial technology', 'transaction', 'processing']
+            if any(kw in industry_lower or kw in business_summary for kw in payment_keywords):
+                # Check for payment-specific industries first
+                for ind_name, peers in self.INDUSTRY_PEERS.items():
+                    if 'payment' in ind_name.lower() or 'financial' in ind_name.lower():
+                        peers = [p for p in peers if p != self.ticker]
+                        if peers:
+                            return peers[:4]
+                # Fallback to general payment processors
+                return ['PYPL', 'SQ', 'STNE', 'PAGS'][:4]
+            
+            # Software keywords - be more specific
+            software_keywords = ['software', 'saas', 'application', 'platform']
+            if any(kw in industry_lower for kw in software_keywords):
+                for ind_name, peers in self.INDUSTRY_PEERS.items():
+                    if 'software' in ind_name.lower():
+                        # Only match if it's clearly software, not payment software
+                        if 'payment' not in industry_lower and 'financial' not in industry_lower:
+                            peers = [p for p in peers if p != self.ticker]
+                            if peers:
+                                return peers[:4]
+            
+            # Try partial match (less aggressive)
             for ind_name, peers in self.INDUSTRY_PEERS.items():
-                if ind_name.lower() in industry.lower() or industry.lower() in ind_name.lower():
+                # More strict matching - require significant overlap
+                ind_words = set(ind_name.lower().split())
+                industry_words = set(industry_lower.split())
+                if len(ind_words & industry_words) >= 2:  # At least 2 words match
                     peers = [p for p in peers if p != self.ticker]
-                    return peers[:4]
+                    if peers:
+                        return peers[:4]
             
-            # Still no match - try to find similar stocks by sector
+            # Last resort: sector fallback (but only if no better match)
             sector = info.get('sector', '')
             similar = []
             
-            # Generic fallback by sector
+            # More specific sector fallbacks
             sector_fallback = {
-                'Technology': ['AAPL', 'MSFT', 'GOOGL', 'META'],
-                'Financial Services': ['JPM', 'V', 'MA', 'GS'],
-                'Healthcare': ['JNJ', 'UNH', 'PFE', 'ABBV'],
-                'Consumer Cyclical': ['AMZN', 'TSLA', 'HD', 'NKE'],
-                'Consumer Defensive': ['PG', 'KO', 'PEP', 'WMT'],
-                'Energy': ['XOM', 'CVX', 'COP', 'SLB'],
-                'Industrials': ['CAT', 'HON', 'UPS', 'BA'],
-                'Communication Services': ['GOOGL', 'META', 'DIS', 'NFLX'],
-                'Utilities': ['NEE', 'DUK', 'SO', 'D'],
-                'Real Estate': ['AMT', 'PLD', 'EQIX', 'PSA'],
-                'Basic Materials': ['LIN', 'APD', 'SHW', 'ECL'],
+                'Financial Services': ['V', 'MA', 'PYPL', 'SQ'],  # Fintech focus
+                'Technology': ['AAPL', 'MSFT', 'GOOGL', 'META'],  # Only if clearly tech
             }
             
             if sector in sector_fallback:
                 similar = [p for p in sector_fallback[sector] if p != self.ticker]
             
-            return similar[:4]
+            return similar[:4] if similar else []
             
         except Exception as e:
             return []
