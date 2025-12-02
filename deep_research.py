@@ -54,9 +54,9 @@ def full_analysis(ticker: str):
     """Run complete analysis on a ticker."""
     ticker = ticker.upper()
     
-    print("\n" + "═" * 60)
+    print("\n" + "═" * 70)
     print(f"🔬 DEEP RESEARCH: {ticker}")
-    print("═" * 60)
+    print("═" * 70)
     
     # 1. Business Understanding
     print("\n📍 Step 1: Understanding the Business...")
@@ -70,66 +70,85 @@ def full_analysis(ticker: str):
     fundamentals.analyze()
     print(fundamentals.format_report())
     
-    # 3. Insider Activity (GPT can't do this - real-time SEC data)
-    print("\n📍 Step 3: Insider Activity (SEC Form 4)...")
-    tracker = InsiderTracker()
-    insider_summary = tracker.get_insider_summary(ticker)
-    if insider_summary:
-        print(tracker.format_summary(insider_summary))
-    else:
-        print("   No recent insider transactions found")
-    
-    # 4. Valuation Analysis
-    print("\n📍 Step 4: Valuation (Fair Value)...")
+    # 3. Valuation Analysis
+    print("\n📍 Step 3: Valuation (Fair Value)...")
     valuation = StockValuation(ticker)
     val_summary = valuation.analyze()
     print(valuation.format_report(val_summary))
     
-    # 5. Technical Context (simple)
-    print("\n📍 Step 5: Price Context...")
-    import yfinance as yf
-    stock = yf.Ticker(ticker)
-    hist = stock.history(period='1y')
+    # 4. Insider Activity (real-time SEC data)
+    print("\n📍 Step 4: Insider Activity (SEC Form 4)...")
+    insider_tracker = InsiderTracker()
+    insider_summary = insider_tracker.get_insider_summary(ticker)
+    if insider_summary:
+        print(insider_tracker.format_summary(insider_summary))
+    else:
+        print("   No recent insider transactions found")
     
-    if not hist.empty:
-        current = hist['Close'].iloc[-1]
-        high_52w = hist['High'].max()
-        low_52w = hist['Low'].min()
-        sma_50 = hist['Close'].iloc[-50:].mean() if len(hist) >= 50 else current
-        sma_200 = hist['Close'].iloc[-200:].mean() if len(hist) >= 200 else current
-        
-        print("─" * 60)
-        print("PRICE CONTEXT")
-        print("─" * 60)
-        print(f"Current Price: ${current:.2f}")
-        print(f"52-Week Range: ${low_52w:.2f} - ${high_52w:.2f}")
-        print(f"Distance from 52w High: {((current/high_52w)-1)*100:.1f}%")
-        print(f"Distance from 52w Low: {((current/low_52w)-1)*100:.1f}%")
-        print(f"50-Day SMA: ${sma_50:.2f} ({'above' if current > sma_50 else 'below'})")
-        print(f"200-Day SMA: ${sma_200:.2f} ({'above' if current > sma_200 else 'below'})")
+    # 5. Short Interest & Squeeze Risk
+    print("\n📍 Step 5: Short Interest...")
+    short_tracker = ShortInterestTracker()
+    short_data = short_tracker.get_short_interest(ticker)
+    if short_data:
+        print(short_tracker.format_report(short_data))
+    else:
+        print("   No short interest data available")
     
-    # 4. Check if in watchlist
+    # 6. Earnings History & Calendar
+    print("\n📍 Step 6: Earnings History...")
+    earnings_tracker = EarningsTracker(ticker)
+    earnings_summary = earnings_tracker.analyze()
+    print(earnings_tracker.format_report(earnings_summary))
+    
+    # 7. Dividends & Buybacks
+    print("\n📍 Step 7: Shareholder Returns...")
+    div_tracker = BuybackDividendTracker(ticker)
+    buyback_data = div_tracker.analyze_buybacks()
+    dividend_data = div_tracker.analyze_dividends()
+    print(div_tracker.format_report(buyback_data, dividend_data))
+    
+    # 8. Options IV & LEAPS Timing
+    print("\n📍 Step 8: Options Analysis...")
+    options_analyzer = OptionsAnalyzer(ticker)
+    options_data = options_analyzer.analyze()
+    print(options_analyzer.format_report(options_data))
+    
+    # 9. Technical Analysis
+    print("\n📍 Step 9: Technical Analysis...")
+    tech_analyzer = TechnicalAnalyzer(ticker)
+    tech_data = tech_analyzer.analyze()
+    print(tech_analyzer.format_report(tech_data))
+    
+    # 10. Peer Comparison
+    print("\n📍 Step 10: Peer Comparison...")
+    peer_analyzer = CompetitorAnalyzer(ticker)
+    peer_result = peer_analyzer.analyze()
+    print(peer_analyzer.format_report(peer_result))
+    
+    # 11. Check if in watchlist
     existing = get_research(ticker)
     if existing:
-        print("\n" + "─" * 60)
-        print("YOUR RESEARCH")
-        print("─" * 60)
-        print(f"Status: {existing['status']}")
-        print(f"Conviction: {existing['conviction']}")
+        print("\n" + "─" * 70)
+        print("📋 YOUR RESEARCH NOTES")
+        print("─" * 70)
+        print(f"  Status: {existing['status']}")
+        print(f"  Conviction: {existing['conviction']}")
         if existing['thesis']:
-            print(f"Thesis: {existing['thesis']}")
+            print(f"  Thesis: {existing['thesis']}")
         if existing['buy_below']:
-            print(f"Buy Below: ${existing['buy_below']:.2f}")
+            print(f"  Buy Below: ${existing['buy_below']:.2f}")
         if existing['sell_above']:
-            print(f"Sell Above: ${existing['sell_above']:.2f}")
+            print(f"  Sell Above: ${existing['sell_above']:.2f}")
         if existing['notes']:
-            print(f"\nRecent Notes:")
+            print(f"\n  Recent Notes:")
             for note in existing['notes'][:3]:
-                print(f"  [{note['created_at'][:10]}] {note['note'][:60]}...")
+                print(f"    [{note['created_at'][:10]}] {note['note'][:60]}...")
     else:
         print("\n💡 Not in your watchlist. Add with: python deep_research.py --add " + ticker)
     
-    print("\n" + "═" * 60)
+    print("\n" + "═" * 70)
+    print("🔬 ANALYSIS COMPLETE")
+    print("═" * 70)
 
 
 def add_to_watchlist(ticker: str):
