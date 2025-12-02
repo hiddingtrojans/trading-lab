@@ -119,6 +119,7 @@ Passed → 5 real opportunities
 | `python deep_research.py --insiders TICKER` | Check insider buying/selling (SEC Form 4) |
 | `python deep_research.py --insiders` | Scan watchlist for insider buying |
 | `python deep_research.py --institutions TICKER` | Check 13F institutional holdings |
+| `python deep_research.py --shorts TICKER` | Check short interest & squeeze risk |
 | `python deep_research.py --add TICKER` | Add to watchlist |
 | `python deep_research.py --thesis TICKER` | Set your thesis & targets |
 | `python deep_research.py --alerts` | Check price alerts |
