@@ -11,6 +11,8 @@ Commands:
     python deep_research.py --discover          # Quick discovery (500 stocks)
     python deep_research.py --weekly-scan       # Full scan (11,552 stocks) + track improvements
     python deep_research.py --improvements      # Show stocks that improved this week
+    python deep_research.py --insiders TICKER   # Check insider buying (SEC Form 4)
+    python deep_research.py --insiders          # Scan watchlist for insider buying
     python deep_research.py --add TICKER        # Add to watchlist
     python deep_research.py --thesis TICKER     # Update your thesis
     python deep_research.py --alerts            # Check price alerts
@@ -34,6 +36,7 @@ from research.database import (
     format_watchlist, get_price_alerts
 )
 from research.discovery_db import DiscoveryDatabase
+from research.insider_tracker import InsiderTracker, check_insider
 
 
 def full_analysis(ticker: str):
@@ -56,8 +59,17 @@ def full_analysis(ticker: str):
     fundamentals.analyze()
     print(fundamentals.format_report())
     
-    # 3. Technical Context (simple)
-    print("\n📍 Step 3: Price Context...")
+    # 3. Insider Activity (GPT can't do this - real-time SEC data)
+    print("\n📍 Step 3: Insider Activity (SEC Form 4)...")
+    tracker = InsiderTracker()
+    insider_summary = tracker.get_insider_summary(ticker)
+    if insider_summary:
+        print(tracker.format_summary(insider_summary))
+    else:
+        print("   No recent insider transactions found")
+    
+    # 4. Technical Context (simple)
+    print("\n📍 Step 4: Price Context...")
     import yfinance as yf
     stock = yf.Ticker(ticker)
     hist = stock.history(period='1y')
@@ -317,6 +329,8 @@ def main():
     parser.add_argument('--thesis', metavar='TICKER', help='Update thesis for ticker')
     parser.add_argument('--alerts', action='store_true', help='Check price alerts')
     parser.add_argument('--note', metavar='TICKER', help='Add note to ticker')
+    parser.add_argument('--insiders', metavar='TICKER', nargs='?', const='watchlist', 
+                        help='Check insider buying (TICKER or "watchlist")')
     parser.add_argument('--max-scan', type=int, default=500, help='Max stocks to scan in quick discover')
     
     args = parser.parse_args()
@@ -348,6 +362,28 @@ def main():
         if note:
             add_note(ticker, note)
             print(f"✅ Note added")
+    elif args.insiders:
+        if args.insiders == 'watchlist':
+            # Scan watchlist for insider buying
+            watchlist = get_watchlist()
+            tickers = [w['ticker'] for w in watchlist]
+            if not tickers:
+                print("\n📭 Watchlist is empty. Add stocks with: python deep_research.py --add TICKER")
+            else:
+                tracker = InsiderTracker()
+                results = tracker.scan_for_buying(tickers)
+                if results:
+                    print("\n" + "═" * 50)
+                    print("🔔 INSIDER BUYING IN YOUR WATCHLIST")
+                    print("═" * 50)
+                    for summary in results:
+                        print(f"\n{summary.signal}")
+                        print(f"   {summary.ticker}: {summary.total_buys_30d} buys (${summary.buy_value_30d:,.0f})")
+                else:
+                    print("\n   No significant insider buying in watchlist")
+        else:
+            # Check single ticker
+            check_insider(args.insiders)
     elif args.ticker:
         full_analysis(args.ticker)
     else:

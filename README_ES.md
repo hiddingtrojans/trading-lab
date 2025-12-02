@@ -5,6 +5,7 @@
 Una herramienta simple para inversores serios que quieren:
 - Descubrir acciones de crecimiento poco cubiertas (escanea 11,000+ acciones de EE.UU.)
 - Filtrar basura con análisis de moat usando IA
+- Rastrear compras/ventas de insiders (datos SEC Form 4 en tiempo real)
 - Seguir tu tesis de inversión a lo largo del tiempo
 - Recibir alertas cuando las acciones alcancen tus precios objetivo
 
@@ -40,8 +41,14 @@ TELEGRAM_CHAT_ID=tu-chat-id
 # Descubrir acciones con filtro GPT
 python3 src/research/smart_discovery.py --scan 300
 
-# Analizar una acción específica
+# Analizar una acción específica (incluye actividad de insiders)
 python deep_research.py AAPL
+
+# Ver compras/ventas de insiders de una acción
+python deep_research.py --insiders AAPL
+
+# Escanear tu watchlist para compras de insiders
+python deep_research.py --insiders
 
 # Añadir a tu watchlist
 python deep_research.py --add AAPL
@@ -109,6 +116,8 @@ Aprobados → 5 oportunidades reales
 |---------|-------------|
 | `python3 src/research/smart_discovery.py` | Encontrar acciones con filtro GPT |
 | `python deep_research.py TICKER` | Análisis completo de una acción |
+| `python deep_research.py --insiders TICKER` | Ver compras/ventas de insiders (SEC Form 4) |
+| `python deep_research.py --insiders` | Escanear watchlist para compras de insiders |
 | `python deep_research.py --add TICKER` | Añadir al watchlist |
 | `python deep_research.py --thesis TICKER` | Establecer tu tesis y objetivos |
 | `python deep_research.py --alerts` | Verificar alertas de precio |
@@ -125,8 +134,16 @@ Esta herramienta está construida sobre una creencia simple:
 ### Lo Que Esta Herramienta Hace
 - ✅ Escanea todo el mercado de EE.UU. (no solo acciones populares)
 - ✅ Filtra basura (bancos, commodities, moats débiles)
+- ✅ **Rastrea compras de insiders** (datos SEC en tiempo real que GPT no tiene)
 - ✅ Te ayuda a seguir tu tesis y objetivos
 - ✅ Elimina la emoción con alertas de precio
+
+### 🔥 Por Qué Importa el Rastreo de Insiders
+
+Los insiders venden por muchas razones (impuestos, diversificación, comprar una casa).
+**Pero COMPRAN por una sola razón: creen que la acción va a subir.**
+
+Esta herramienta obtiene datos SEC Form 4 en tiempo real - información que ChatGPT no tiene.
 
 ### Lo Que Esta Herramienta NO Hace
 - ❌ Decirte qué comprar
@@ -158,6 +175,7 @@ stock-research/
 │   │   ├── smart_discovery.py    # Descubrimiento + filtro GPT
 │   │   ├── discovery.py          # Escaneo del universo
 │   │   ├── moat_analyzer.py      # Análisis de moat con GPT
+│   │   ├── insider_tracker.py    # Datos SEC Form 4 (¡GPT no puede hacer esto!)
 │   │   ├── fundamentals.py       # Análisis financiero
 │   │   ├── business.py           # Análisis del negocio
 │   │   └── database.py           # Almacenamiento de investigación

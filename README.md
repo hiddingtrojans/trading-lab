@@ -5,6 +5,7 @@
 A simple tool for serious investors who want to:
 - Discover undercovered growth stocks (scans 11,000+ US stocks)
 - Filter out garbage with AI moat analysis
+- Track insider buying/selling (real-time SEC Form 4 data)
 - Track your investment thesis over time
 - Get alerts when stocks hit your price targets
 
@@ -40,8 +41,14 @@ TELEGRAM_CHAT_ID=your-chat-id
 # Discover stocks with GPT moat filter
 python3 src/research/smart_discovery.py --scan 300
 
-# Analyze a specific stock
+# Analyze a specific stock (includes insider activity)
 python deep_research.py AAPL
+
+# Check insider buying/selling for any stock
+python deep_research.py --insiders AAPL
+
+# Scan your watchlist for insider buying
+python deep_research.py --insiders
 
 # Add to your watchlist
 python deep_research.py --add AAPL
@@ -109,6 +116,8 @@ Passed → 5 real opportunities
 |---------|-------------|
 | `python3 src/research/smart_discovery.py` | Find stocks with GPT filter |
 | `python deep_research.py TICKER` | Full analysis of a stock |
+| `python deep_research.py --insiders TICKER` | Check insider buying/selling (SEC Form 4) |
+| `python deep_research.py --insiders` | Scan watchlist for insider buying |
 | `python deep_research.py --add TICKER` | Add to watchlist |
 | `python deep_research.py --thesis TICKER` | Set your thesis & targets |
 | `python deep_research.py --alerts` | Check price alerts |
@@ -125,8 +134,16 @@ This tool is built on a simple belief:
 ### What This Tool Does
 - ✅ Scans the entire US market (not just popular stocks)
 - ✅ Filters out garbage (banks, commodities, weak moats)
+- ✅ **Tracks insider buying** (real-time SEC data GPT doesn't have)
 - ✅ Helps you track your thesis and targets
 - ✅ Removes emotion with price alerts
+
+### 🔥 Why Insider Tracking Matters
+
+Insiders sell for many reasons (taxes, diversification, buying a house).
+**But they BUY for only ONE reason: they think the stock will go up.**
+
+This tool fetches real-time SEC Form 4 filings - data that ChatGPT doesn't have access to.
 
 ### What This Tool Doesn't Do
 - ❌ Tell you what to buy
@@ -158,6 +175,7 @@ stock-research/
 │   │   ├── smart_discovery.py    # Discovery + GPT filter
 │   │   ├── discovery.py          # Universe scanning
 │   │   ├── moat_analyzer.py      # GPT moat analysis
+│   │   ├── insider_tracker.py    # SEC Form 4 insider data (GPT can't do this!)
 │   │   ├── fundamentals.py       # Financial analysis
 │   │   ├── business.py           # Business analysis
 │   │   └── database.py           # Research storage
