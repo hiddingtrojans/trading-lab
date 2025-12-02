@@ -118,6 +118,7 @@ Aprobados → 5 oportunidades reales
 | `python deep_research.py TICKER` | Análisis completo de una acción |
 | `python deep_research.py --insiders TICKER` | Ver compras/ventas de insiders (SEC Form 4) |
 | `python deep_research.py --insiders` | Escanear watchlist para compras de insiders |
+| `python deep_research.py --institutions TICKER` | Ver holdings institucionales (13F) |
 | `python deep_research.py --add TICKER` | Añadir al watchlist |
 | `python deep_research.py --thesis TICKER` | Establecer tu tesis y objetivos |
 | `python deep_research.py --alerts` | Verificar alertas de precio |

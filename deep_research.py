@@ -13,6 +13,7 @@ Commands:
     python deep_research.py --improvements      # Show stocks that improved this week
     python deep_research.py --insiders TICKER   # Check insider buying (SEC Form 4)
     python deep_research.py --insiders          # Scan watchlist for insider buying
+    python deep_research.py --institutions TICKER # Check 13F institutional holdings
     python deep_research.py --add TICKER        # Add to watchlist
     python deep_research.py --thesis TICKER     # Update your thesis
     python deep_research.py --alerts            # Check price alerts
@@ -37,6 +38,7 @@ from research.database import (
 )
 from research.discovery_db import DiscoveryDatabase
 from research.insider_tracker import InsiderTracker, check_insider
+from research.institutional_tracker import InstitutionalTracker, check_institutions
 
 
 def full_analysis(ticker: str):
@@ -331,6 +333,8 @@ def main():
     parser.add_argument('--note', metavar='TICKER', help='Add note to ticker')
     parser.add_argument('--insiders', metavar='TICKER', nargs='?', const='watchlist', 
                         help='Check insider buying (TICKER or "watchlist")')
+    parser.add_argument('--institutions', metavar='TICKER', 
+                        help='Check institutional 13F holdings')
     parser.add_argument('--max-scan', type=int, default=500, help='Max stocks to scan in quick discover')
     
     args = parser.parse_args()
@@ -384,6 +388,9 @@ def main():
         else:
             # Check single ticker
             check_insider(args.insiders)
+    elif args.institutions:
+        # Check institutional 13F holdings
+        check_institutions(args.institutions)
     elif args.ticker:
         full_analysis(args.ticker)
     else:
