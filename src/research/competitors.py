@@ -65,24 +65,33 @@ class CompetitorAnalyzer:
     4. Geographic focus (if applicable)
     """
     
-    # Business model keyword patterns
+    # Business model keyword patterns - more comprehensive
     BUSINESS_MODELS = {
         'payment_processing': ['payment', 'transaction processing', 'payment gateway', 'merchant', 
-                              'payment solution', 'fintech', 'payment platform', 'checkout'],
+                              'payment solution', 'fintech', 'payment platform', 'checkout', 'payments'],
         'saas': ['software as a service', 'saas', 'cloud software', 'subscription software', 
-                'enterprise software', 'software platform'],
+                'enterprise software', 'software platform', 'crm', 'customer relationship'],
+        'marketing_tech': ['marketing automation', 'marketing platform', 'marketing software', 
+                          'digital marketing', 'advertising technology', 'adtech', 'martech',
+                          'consumer intelligence', 'customer data platform', 'cdp'],
+        'data_analytics': ['data analytics', 'business intelligence', 'data platform', 
+                          'analytics platform', 'data warehouse', 'big data'],
         'ecommerce': ['e-commerce', 'online retail', 'marketplace', 'online store', 'digital commerce'],
         'banking': ['bank', 'banking', 'financial services', 'digital bank', 'neobank'],
         'streaming': ['streaming', 'video streaming', 'content streaming', 'entertainment platform'],
-        'semiconductor': ['semiconductor', 'chip', 'processor', 'integrated circuit'],
+        'semiconductor': ['semiconductor', 'chip', 'processor', 'integrated circuit', 'gpu', 'cpu'],
         'retail': ['retail', 'retailer', 'store', 'shopping'],
-        'cloud_infrastructure': ['cloud infrastructure', 'cloud computing', 'data center', 'cloud platform'],
+        'cloud_infrastructure': ['cloud infrastructure', 'cloud computing', 'data center', 
+                                'cloud platform', 'cdn', 'content delivery'],
+        'cybersecurity': ['cybersecurity', 'security software', 'network security', 'endpoint security'],
+        'video_conferencing': ['video conferencing', 'video communication', 'virtual meeting'],
     }
     
     # Common stocks by sector for peer search (curated list for efficiency)
     SECTOR_UNIVERSE = {
         'Technology': ['AAPL', 'MSFT', 'GOOGL', 'META', 'NVDA', 'AMD', 'INTC', 'CRM', 'NOW', 
-                      'ORCL', 'ADBE', 'INTU', 'SNOW', 'DDOG', 'NET', 'MDB', 'ZM', 'TEAM'],
+                      'ORCL', 'ADBE', 'INTU', 'SNOW', 'DDOG', 'NET', 'MDB', 'ZM', 'TEAM',
+                      'ZETA', 'HUBS', 'MKTO', 'TTD', 'TRMR', 'FROG', 'DOCN', 'ESTC', 'SPLK'],
         'Financial Services': ['JPM', 'BAC', 'C', 'WFC', 'GS', 'MS', 'V', 'MA', 'PYPL', 'SQ', 
                               'AXP', 'COF', 'DFS', 'STNE', 'PAGS', 'NU', 'DLO', 'SOFI', 'AFRM'],
         'Healthcare': ['JNJ', 'UNH', 'PFE', 'ABBV', 'LLY', 'MRK', 'BMY', 'AMGN', 'GILD', 
@@ -101,6 +110,22 @@ class CompetitorAnalyzer:
         self.stock = yf.Ticker(self.ticker)
         self.info = self.stock.info
     
+    # Business model specificity (higher = more specific/important)
+    MODEL_PRIORITY = {
+        'semiconductor': 10,
+        'payment_processing': 10,
+        'marketing_tech': 9,
+        'cybersecurity': 9,
+        'video_conferencing': 9,
+        'data_analytics': 8,
+        'banking': 8,
+        'streaming': 8,
+        'saas': 7,
+        'cloud_infrastructure': 6,
+        'ecommerce': 7,
+        'retail': 5,
+    }
+    
     def _extract_business_model(self, description: str) -> Set[str]:
         """Extract business model keywords from description."""
         description_lower = description.lower()
@@ -113,6 +138,15 @@ class CompetitorAnalyzer:
                     break
         
         return models
+    
+    def _get_primary_model(self, models: Set[str]) -> Optional[str]:
+        """Get the most specific/important business model."""
+        if not models:
+            return None
+        
+        # Return model with highest priority
+        prioritized = sorted(models, key=lambda m: self.MODEL_PRIORITY.get(m, 0), reverse=True)
+        return prioritized[0] if prioritized else None
     
     def _get_market_cap_range(self, market_cap: float) -> tuple:
         """Get market cap range for peer search (within 10x-0.1x)."""
@@ -141,30 +175,58 @@ class CompetitorAnalyzer:
             peer_desc = peer_info.get('longBusinessSummary', '').lower()
             peer_models = self._extract_business_model(peer_desc)
             
-            # 1. Business model match (50 points) - MOST IMPORTANT
+            # 1. Business model match (60 points) - MOST IMPORTANT
             if target_models and peer_models:
                 overlap = len(target_models & peer_models)
                 if overlap > 0:
-                    score += 50  # Strong match
-                elif target_models:  # Check for keyword overlap in descriptions
-                    # Count shared keywords
-                    target_words = set(re.findall(r'\b\w{4,}\b', target_desc.lower()))
-                    peer_words = set(re.findall(r'\b\w{4,}\b', peer_desc))
+                    # Check if primary models match (most important)
+                    target_primary = self._get_primary_model(target_models)
+                    peer_primary = self._get_primary_model(peer_models)
+                    
+                    if target_primary and peer_primary and target_primary == peer_primary:
+                        # Primary models match - highest score
+                        score += 70
+                    else:
+                        # Secondary models match - still good but less
+                        score += 50
+                    
+                    # Bonus for multiple model matches
+                    if overlap > 1:
+                        score += 10
+                elif target_models:  # Check for keyword overlap only if no model match
+                    # Count shared keywords (much stricter)
+                    target_words = set(re.findall(r'\b\w{5,}\b', target_desc.lower()))
+                    peer_words = set(re.findall(r'\b\w{5,}\b', peer_desc))
                     shared = len(target_words & peer_words)
-                    if shared > 5:  # Significant keyword overlap
-                        score += 30
+                    # Only give points if significant overlap AND same industry keywords
+                    if shared > 8:  # Much higher threshold
+                        score += 15  # Reduced from 30
             
-            # 2. Sector match (30 points) - less important than business model
+            # 2. Industry match (25 points) - more specific than sector
+            target_industry = self.info.get('industry', '').lower()
+            peer_industry = peer_info.get('industry', '').lower()
+            
+            if target_industry and peer_industry:
+                # Check for significant industry overlap
+                target_ind_words = set(target_industry.split())
+                peer_ind_words = set(peer_industry.split())
+                ind_overlap = len(target_ind_words & peer_ind_words)
+                if ind_overlap >= 2:  # At least 2 words match
+                    score += 25
+                elif ind_overlap == 1:
+                    score += 10
+            
+            # 3. Sector match (15 points) - less important
             peer_sector = peer_info.get('sector', '')
             if peer_sector == target_sector:
-                score += 30
+                score += 15
             elif peer_sector:  # Partial credit for related sectors
-                score += 5
+                score += 3
             
-            # 3. Market cap similarity (20 points)
+            # 4. Market cap similarity (10 points) - less important
             if target_mcap > 0:
                 ratio = min(peer_mcap, target_mcap) / max(peer_mcap, target_mcap)
-                score += ratio * 20  # Closer market cap = higher score
+                score += ratio * 10  # Closer market cap = higher score
             
             return score
             
@@ -206,6 +268,8 @@ class CompetitorAnalyzer:
             
             # Score all candidates
             scored_peers = []
+            business_model_matches = []
+            
             for candidate in candidates:
                 if candidate == self.ticker:
                     continue
@@ -214,10 +278,51 @@ class CompetitorAnalyzer:
                     candidate, business_models, market_cap, sector, description
                 )
                 
-                if score > 25:  # Minimum threshold (raised for better quality)
+                # Separate business model matches from others
+                if score >= 50:  # Business model match (primary or secondary)
+                    business_model_matches.append((score, candidate))
+                elif score >= 40:  # Strong industry/sector match
                     scored_peers.append((score, candidate))
             
-            # Sort by score and return top 4
+            # If we have business model matches, prioritize those
+            if business_model_matches:
+                # Check if target has a highly specific primary model
+                target_primary = self._get_primary_model(business_models)
+                primary_priority = self.MODEL_PRIORITY.get(target_primary, 0) if target_primary else 0
+                
+                # If primary model is highly specific (priority >= 9), only match same primary
+                if primary_priority >= 9:
+                    primary_matches = []
+                    for score, ticker in business_model_matches:
+                        try:
+                            peer_stock = yf.Ticker(ticker)
+                            peer_desc = peer_stock.info.get('longBusinessSummary', '')
+                            peer_models = self._extract_business_model(peer_desc)
+                            peer_primary = self._get_primary_model(peer_models)
+                            if peer_primary == target_primary:
+                                primary_matches.append((score, ticker))
+                        except:
+                            pass
+                    
+                    if primary_matches:
+                        primary_matches.sort(reverse=True, key=lambda x: x[0])
+                        return [ticker for _, ticker in primary_matches[:4]]
+                
+                # Otherwise, use all business model matches
+                business_model_matches.sort(reverse=True, key=lambda x: x[0])
+                result = [ticker for _, ticker in business_model_matches[:4]]
+                if len(result) >= 2:  # If we have at least 2 good matches, use only those
+                    return result
+                # If only 1 match, add best sector matches but require high score
+                if len(result) == 1:
+                    scored_peers.sort(reverse=True, key=lambda x: x[0])
+                    # Only add sector matches with very high scores (55+)
+                    high_scoring = [ticker for score, ticker in scored_peers if score >= 55]
+                    result.extend(high_scoring[:3])
+                    return result[:4]
+                return result
+            
+            # No business model matches - return best sector matches
             scored_peers.sort(reverse=True, key=lambda x: x[0])
             return [ticker for _, ticker in scored_peers[:4]]
             
