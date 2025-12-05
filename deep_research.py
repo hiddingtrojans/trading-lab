@@ -48,11 +48,36 @@ from research.buyback_dividend import BuybackDividendTracker, check_buyback_divi
 from research.options_analysis import OptionsAnalyzer, check_options
 from research.technical_analysis import TechnicalAnalyzer, check_technicals
 from research.competitors import CompetitorAnalyzer, compare_competitors
+from research.pdf_export import export_analysis_to_pdf
 
 
-def full_analysis(ticker: str):
+def full_analysis(ticker: str, export_pdf: bool = False, pdf_output: str = None):
     """Run complete analysis on a ticker."""
     ticker = ticker.upper()
+    
+    # Capture output if PDF export requested
+    captured_output = None
+    if export_pdf:
+        import sys
+        from io import StringIO
+        
+        class TeeOutput:
+            """Write to both stdout and StringIO."""
+            def __init__(self, original_stdout, stringio):
+                self.original_stdout = original_stdout
+                self.stringio = stringio
+            
+            def write(self, text):
+                self.original_stdout.write(text)
+                self.stringio.write(text)
+            
+            def flush(self):
+                self.original_stdout.flush()
+                self.stringio.flush()
+        
+        stringio = StringIO()
+        sys.stdout = TeeOutput(sys.stdout, stringio)
+        captured_output = stringio
     
     print("\n" + "═" * 70)
     print(f"🔬 DEEP RESEARCH: {ticker}")
@@ -149,6 +174,21 @@ def full_analysis(ticker: str):
     print("\n" + "═" * 70)
     print("🔬 ANALYSIS COMPLETE")
     print("═" * 70)
+    
+    # Export to PDF if requested
+    if export_pdf and captured_output:
+        import sys
+        # Get captured output before restoring
+        output_text = captured_output.getvalue()
+        # Restore stdout (if we used TeeOutput, it's already writing to both)
+        if hasattr(sys.stdout, 'original_stdout'):
+            sys.stdout = sys.stdout.original_stdout
+        # Export to PDF
+        try:
+            pdf_path = export_analysis_to_pdf(ticker, output_text, pdf_output)
+            print(f"\n✅ PDF exported to: {pdf_path}")
+        except Exception as e:
+            print(f"\n❌ Error exporting PDF: {e}")
 
 
 def add_to_watchlist(ticker: str):
@@ -384,6 +424,10 @@ def main():
     parser.add_argument('--peers', metavar='TICKER', 
                         help='Compare to industry peers')
     parser.add_argument('--max-scan', type=int, default=500, help='Max stocks to scan in quick discover')
+    parser.add_argument('--pdf', action='store_true', 
+                        help='Export analysis to PDF file')
+    parser.add_argument('--pdf-output', metavar='PATH', 
+                        help='Custom output path for PDF (requires --pdf)')
     
     args = parser.parse_args()
     
@@ -461,7 +505,7 @@ def main():
         # Peer comparison
         compare_competitors(args.peers)
     elif args.ticker:
-        full_analysis(args.ticker)
+        full_analysis(args.ticker, export_pdf=args.pdf, pdf_output=args.pdf_output)
     else:
         # Show watchlist
         print(format_watchlist())

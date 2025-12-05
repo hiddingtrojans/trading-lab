@@ -13,3 +13,6 @@ python-telegram-bot>=20.0
 
 # Database
 # (uses built-in sqlite3)
+
+# PDF Export
+reportlab>=4.0.0

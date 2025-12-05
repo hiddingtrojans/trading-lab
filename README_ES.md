@@ -44,6 +44,10 @@ python3 src/research/smart_discovery.py --scan 300
 # Analizar una acción específica (incluye actividad de insiders)
 python deep_research.py AAPL
 
+# Exportar análisis a PDF
+python deep_research.py AAPL --pdf
+python deep_research.py AAPL --pdf --pdf-output nombre_personalizado.pdf
+
 # Ver compras/ventas de insiders de una acción
 python deep_research.py --insiders AAPL
 
@@ -116,6 +120,7 @@ Aprobados → 5 oportunidades reales
 |---------|-------------|
 | `python3 src/research/smart_discovery.py` | Encontrar acciones con filtro GPT |
 | `python deep_research.py TICKER` | Análisis completo de una acción |
+| `python deep_research.py TICKER --pdf` | Exportar análisis completo a PDF |
 | `python deep_research.py --insiders TICKER` | Ver compras/ventas de insiders (SEC Form 4) |
 | `python deep_research.py --insiders` | Escanear watchlist para compras de insiders |
 | `python deep_research.py --institutions TICKER` | Ver holdings institucionales (13F) |
