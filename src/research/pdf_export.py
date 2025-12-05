@@ -11,8 +11,9 @@ try:
     from reportlab.lib.pagesizes import letter, A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Preformatted
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Preformatted, Table, TableStyle
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+    from reportlab.lib import colors
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
     REPORTLAB_AVAILABLE = True
@@ -67,23 +68,60 @@ class PDFExporter:
             spaceBefore=8,
         ))
         
-        # Body text
+        # Body text with proper wrapping
         self.styles.add(ParagraphStyle(
             name='Body',
             parent=self.styles['Normal'],
             fontSize=10,
             textColor='#333333',
-            spaceAfter=6,
+            spaceAfter=8,
             leading=14,
+            alignment=TA_LEFT,
+            wordWrap='CJK',  # Better word wrapping
+        ))
+        
+        # Bullet point style
+        bullet_style_name = 'CustomBullet'
+        try:
+            # Try to access it - if it doesn't exist, create it
+            _ = self.styles[bullet_style_name]
+        except KeyError:
+            # Style doesn't exist, create it
+            self.styles.add(ParagraphStyle(
+                name=bullet_style_name,
+                parent=self.styles['Body'],
+                leftIndent=20,
+                bulletIndent=10,
+                spaceAfter=6,
+            ))
+        
+        # Header style for subsections
+        self.styles.add(ParagraphStyle(
+            name='SubHeader',
+            parent=self.styles['Heading3'],
+            fontSize=11,
+            textColor='#2c3e50',
+            spaceAfter=6,
+            spaceBefore=10,
+            fontName='Helvetica-Bold',
         ))
         
         # Code/Monospace (for tables)
         self.styles.add(ParagraphStyle(
             name='Monospace',
             parent=self.styles['Normal'],
-            fontSize=9,
+            fontSize=8,
             fontName='Courier',
             textColor='#333333',
+            spaceAfter=4,
+        ))
+        
+        # Small text for metadata
+        self.styles.add(ParagraphStyle(
+            name='Small',
+            parent=self.styles['Normal'],
+            fontSize=8,
+            textColor='#666666',
             spaceAfter=4,
         ))
     
@@ -112,44 +150,103 @@ class PDFExporter:
         self.story.append(Spacer(1, 0.1*inch))
         self.story.append(Paragraph(title, self.styles['Subsection']))
     
+    def _clean_text(self, text: str) -> str:
+        """Clean and escape text for PDF."""
+        import html
+        # Replace emojis with text equivalents
+        replacements = {
+            '🔬': 'RESEARCH',
+            '📊': 'METRICS',
+            '💰': 'VALUATION',
+            '🏢': 'BUSINESS',
+            '📍': 'LOCATION',
+            '📈': '↑',
+            '📉': '↓',
+            '✅': '✓',
+            '⚠️': 'WARNING',
+            '🚀': 'ROCKET',
+            '🟢': '●',
+            '🔴': '●',
+            '🟠': '●',
+            '⚪': '○',
+            '🥇': '1st',
+            '🥈': '2nd',
+            '🥉': '3rd',
+        }
+        for emoji, replacement in replacements.items():
+            text = text.replace(emoji, replacement)
+        # Escape HTML characters
+        text = html.escape(text)
+        return text
+    
     def add_text(self, text: str, preserve_formatting: bool = False):
-        """Add body text."""
+        """Add body text with proper wrapping."""
         if preserve_formatting:
             # Use Preformatted for tables and fixed-width text
             self.story.append(Preformatted(text, self.styles['Monospace']))
         else:
-            # Clean up text for paragraph formatting
-            # Replace emojis with text equivalents
-            text = text.replace('🔬', '[RESEARCH]')
-            text = text.replace('📊', '[METRICS]')
-            text = text.replace('💰', '[VALUATION]')
-            text = text.replace('🏢', '[BUSINESS]')
-            text = text.replace('📍', '[LOCATION]')
-            text = text.replace('📈', '[UP]')
-            text = text.replace('📉', '[DOWN]')
-            text = text.replace('✅', '[CHECK]')
-            text = text.replace('⚠️', '[WARNING]')
-            text = text.replace('🚀', '[ROCKET]')
-            text = text.replace('🟢', '[GREEN]')
-            text = text.replace('🔴', '[RED]')
-            text = text.replace('🟠', '[ORANGE]')
-            text = text.replace('⚪', '[NEUTRAL]')
-            
-            # Split by lines and add as paragraphs
+            # Process text line by line with better handling
             lines = text.split('\n')
+            in_list = False
+            
             for line in lines:
                 line = line.strip()
+                
+                # Skip empty lines (but add small spacer)
                 if not line:
-                    self.story.append(Spacer(1, 0.05*inch))
-                elif line.startswith('═') or line.startswith('─') or line.startswith('━'):
-                    # Skip separator lines
+                    if not in_list:
+                        self.story.append(Spacer(1, 0.08*inch))
                     continue
-                elif len(line) > 100 and not line.startswith('  '):
-                    # Long line - split into paragraphs
-                    self.story.append(Paragraph(line, self.styles['Body']))
+                
+                # Skip separator lines
+                if line.startswith('═') or line.startswith('─') or line.startswith('━') or line.startswith('│'):
+                    continue
+                
+                # Handle headers (lines that are all caps or have specific patterns)
+                if (line.isupper() and len(line) > 5 and len(line) < 50) or \
+                   (line.endswith(':') and len(line) < 50):
+                    # Subsection header
+                    cleaned = self._clean_text(line)
+                    self.story.append(Spacer(1, 0.1*inch))
+                    self.story.append(Paragraph(f"<b>{cleaned}</b>", self.styles['SubHeader']))
+                    in_list = False
+                    continue
+                
+                # Handle bullet points
+                if line.startswith('•') or line.startswith('-') or line.startswith('✓') or line.startswith('⚠'):
+                    cleaned = self._clean_text(line)
+                    # Use bullet style if available, otherwise use Body
+                    try:
+                        bullet_style = self.styles['CustomBullet']
+                    except KeyError:
+                        bullet_style = self.styles['Body']
+                    self.story.append(Paragraph(f"&bull; {cleaned[1:].strip()}", bullet_style))
+                    in_list = True
+                    continue
+                
+                # Handle numbered items
+                if line[0].isdigit() and (line[1] == '.' or line[1] == ')'):
+                    cleaned = self._clean_text(line)
+                    try:
+                        bullet_style = self.styles['CustomBullet']
+                    except KeyError:
+                        bullet_style = self.styles['Body']
+                    self.story.append(Paragraph(cleaned, bullet_style))
+                    in_list = True
+                    continue
+                
+                # Regular paragraph - use proper wrapping
+                cleaned = self._clean_text(line)
+                
+                # If it's a very long line, it's likely a paragraph that needs wrapping
+                if len(line) > 80:
+                    # This is a paragraph - let Paragraph handle wrapping
+                    self.story.append(Paragraph(cleaned, self.styles['Body']))
                 else:
-                    # Short line or indented - preserve as is
-                    self.story.append(Paragraph(line, self.styles['Body']))
+                    # Short line - might be a label or single item
+                    self.story.append(Paragraph(cleaned, self.styles['Body']))
+                
+                in_list = False
     
     def add_page_break(self):
         """Add a page break."""
@@ -165,10 +262,10 @@ class PDFExporter:
         doc = SimpleDocTemplate(
             self.output_path,
             pagesize=letter,
-            rightMargin=0.75*inch,
-            leftMargin=0.75*inch,
-            topMargin=0.75*inch,
-            bottomMargin=0.75*inch,
+            rightMargin=0.7*inch,
+            leftMargin=0.7*inch,
+            topMargin=0.7*inch,
+            bottomMargin=0.7*inch,
         )
         
         doc.build(self.story)
@@ -200,56 +297,84 @@ def export_analysis_to_pdf(ticker: str, analysis_output: str, output_path: Optio
         "Comprehensive Stock Analysis"
     )
     
-    # Split output into sections by step markers
+    # Better section parsing - split by major section markers
+    lines = analysis_output.split('\n')
     sections = []
     current_section = []
+    current_title = None
     
-    for line in analysis_output.split('\n'):
-        if '📍 Step' in line or '═' * 50 in line or '═' * 60 in line or '═' * 70 in line:
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        
+        # Check for step markers
+        if '📍 Step' in line:
+            # Save previous section
             if current_section:
-                sections.append('\n'.join(current_section))
-            current_section = [line]
-        else:
-            current_section.append(line)
-    
-    if current_section:
-        sections.append('\n'.join(current_section))
-    
-    # Process each section
-    for section in sections:
-        if not section.strip():
+                sections.append((current_title, '\n'.join(current_section)))
+            # Start new section
+            if ':' in line:
+                current_title = line.split(':', 1)[1].strip()
+            else:
+                current_title = line.replace('📍', '').replace('Step', '').strip()
+            current_section = []
+            i += 1
             continue
         
-        lines = section.split('\n')
-        # Find section title
-        title = None
-        content_start = 0
+        # Check for major section headers (long separator lines)
+        if (line.startswith('═') and len(line) > 50) or \
+           (line.startswith('─') and len(line) > 50):
+            # Look for header in next few lines
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                # If next line looks like a header (has emoji or is short and descriptive)
+                if next_line and len(next_line) < 80 and \
+                   (any(c in next_line for c in '🔬📊💰🏢📈📉✅⚠️🚀') or 
+                    next_line.isupper() or
+                    'ANALYSIS' in next_line.upper() or
+                    'REPORT' in next_line.upper()):
+                    # This might be a subsection header
+                    if current_section:
+                        sections.append((current_title, '\n'.join(current_section)))
+                    current_title = next_line
+                    current_section = []
+                    i += 2  # Skip separator and header
+                    continue
         
-        for i, line in enumerate(lines):
-            if '📍 Step' in line:
-                # Extract step title
-                if ':' in line:
-                    title = line.split(':', 1)[1].strip()
-                else:
-                    title = line.replace('📍', '').strip()
-                content_start = i + 1
-                break
-            elif line.startswith('═') and len(line) > 20:
-                # Section header
-                title = lines[i+1] if i+1 < len(lines) else None
-                content_start = i + 2
-                break
+        current_section.append(line)
+        i += 1
+    
+    # Add last section
+    if current_section:
+        sections.append((current_title, '\n'.join(current_section)))
+    
+    # Process each section
+    for title, content in sections:
+        if not content.strip():
+            continue
         
+        # Add section header if we have one
         if title:
             exporter.add_section(title)
         
-        # Add content
-        content = '\n'.join(lines[content_start:])
+        # Clean up content
         content = content.strip()
         
         if content:
-            # Check if it looks like a table
-            is_table = '│' in content or ('  ' in content and len([l for l in content.split('\n') if l.strip()]) > 3)
+            # Check if it looks like a table (has │ or structured columns)
+            has_table_markers = '│' in content
+            has_structured_columns = False
+            
+            # Check for structured data (multiple spaces, aligned columns)
+            lines_check = [l for l in content.split('\n') if l.strip() and not l.strip().startswith('─')]
+            if len(lines_check) > 3:
+                # Check if lines have similar structure (potential table)
+                first_line = lines_check[0]
+                if '  ' in first_line and len(first_line.split()) > 3:
+                    has_structured_columns = True
+            
+            is_table = has_table_markers or has_structured_columns
+            
             exporter.add_text(content, preserve_formatting=is_table)
     
     # Generate PDF
